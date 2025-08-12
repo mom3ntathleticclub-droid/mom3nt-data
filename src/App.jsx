@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
@@ -20,8 +19,20 @@ const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const range = (n) => Array.from({length: n}, (_,i) => i);
 
+// Parse #hash params like access_token, refresh_token, etc.
+function parseHash() {
+  if (!window.location.hash || window.location.hash.length < 2) return {};
+  return window.location.hash
+    .substring(1)
+    .split('&')
+    .map(pair => pair.split('='))
+    .reduce((acc, [k, v]) => {
+      acc[decodeURIComponent(k)] = decodeURIComponent(v || '');
+      return acc;
+    }, {});
+}
+
 export default function App() {
-  // Auth/session
   const [session, setSession] = useState(null);
 
   // Profile (sync with Supabase; also mirrored locally)
@@ -30,7 +41,7 @@ export default function App() {
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
 
   // UI
-  const [tab, setTab] = useState('calendar'); // calendar | database | leaderboard
+  const [tab, setTab] = useState('calendar');
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
@@ -38,28 +49,53 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Auth lifecycle ---
+  // --- Handle magic link on first load (hash) ---
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session ?? null);
+      const h = parseHash();
+
+      // If Supabase sent an error in the hash, show it
+      if (h.error_description) {
+        alert(h.error_description.replace(/\+/g, ' '));
+      }
+
+      // If we have tokens in the hash (magic link), set the session
+      if (h.access_token && h.refresh_token) {
+        try {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: h.access_token,
+            refresh_token: h.refresh_token,
+          });
+          if (error) console.error('setSession error:', error);
+          setSession(data?.session ?? null);
+        } catch (e) {
+          console.error('setSession threw:', e);
+        } finally {
+          // Clean the URL so tokens aren’t left in the address bar
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+        }
+      } else {
+        // No tokens in URL—load existing session (if any)
+        const { data } = await supabase.auth.getSession();
+        setSession(data.session ?? null);
+      }
+
+      // Subscribe to future auth changes
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+      return () => sub.subscription.unsubscribe();
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
   }, []);
 
   // Load entries + profile once logged in
   useEffect(() => {
     if (!session) return;
     (async () => {
-      // entries
       const { data: eData } = await supabase
         .from('entries')
         .select('*')
         .order('date', { ascending: true });
       setEntries(eData || []);
 
-      // profile
       const { data: pData } = await supabase
         .from('profiles')
         .select('name, gender')
@@ -130,7 +166,6 @@ export default function App() {
     return entries.filter(e => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // Build series per movement (my data only) for charts
   const seriesByMovement = useMemo(() => {
     const map = {};
     Object.values(MOVEMENTS).forEach(m => { map[m.name] = []; });
@@ -141,7 +176,7 @@ export default function App() {
     return map;
   }, [myEntries]);
 
-  // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
+  // Leaderboard (today) – best per user per gender (Top 5)
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
     const rows = entries.filter(e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female'));
@@ -157,12 +192,13 @@ export default function App() {
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
-  // Calendar grid (mobile friendly)
+  // Calendar grid
   function CalendarGrid() {
     const y = monthDate.getFullYear();
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
     const start = first.getDay(); // 0 Sun
+    the: // eslint silencer
     const days = new Date(y, m+1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d+1))];
 
@@ -205,7 +241,7 @@ export default function App() {
       if (!email) return alert('Enter your email');
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: window.location.origin } // returns to this site
+        options: { emailRedirectTo: window.location.origin } // ensures redirect back to deployed site
       });
       if (error) alert(error.message);
       else alert('Magic link sent! Check your email.');
@@ -237,7 +273,6 @@ export default function App() {
 
   return (
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
-      {/* Header with top tabs + profile */}
       <header style={{position:'sticky',top:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'12px 12px',background:'#000',color:'#fff'}}>
         <strong style={{whiteSpace:'nowrap'}}>MOM3NT DATA</strong>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
@@ -248,11 +283,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* Content */}
       <main style={{maxWidth:680, margin:'12px auto', padding:'0 12px 48px', color:'#000'}}>
         {tab === 'calendar' && (
           <section>
-            {/* Month switcher */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8, color:'#000'}}>
               <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()-1, 1))}>◀︎</button>
               <div style={{fontWeight:700, color:'#000'}}>{monthLabel(monthDate)}</div>
@@ -263,7 +296,6 @@ export default function App() {
               <CalendarGrid />
             </div>
 
-            {/* Selected day movement + input */}
             <div style={{marginTop:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                 <div>
