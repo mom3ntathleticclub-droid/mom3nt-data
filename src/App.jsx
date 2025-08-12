@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
@@ -23,7 +24,7 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Profile (sync with Supabase; also mirrored locally for convenience)
+  // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
   const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
@@ -68,7 +69,6 @@ export default function App() {
       if (pData) {
         if (pData.name) setName(pData.name);
         if (pData.gender) setGender(pData.gender);
-        // mirror locally for convenience
         localStorage.setItem('mom3nt_name', pData.name || '');
         localStorage.setItem('mom3nt_gender', pData.gender || '');
       }
@@ -198,17 +198,42 @@ export default function App() {
     );
   }
 
-  // Not logged in (simple hint)
+  // ---------- LOGGED-OUT SCREEN WITH REAL LOGIN ----------
   if (!session) {
+    const [email, setEmail] = useState('');
+    async function sendMagicLink() {
+      if (!email) return alert('Enter your email');
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.origin } // returns to this site
+      });
+      if (error) alert(error.message);
+      else alert('Magic link sent! Check your email.');
+    }
+
     return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
-        <div style={{maxWidth:340}}>
-          <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
-          <p>Sign in with the magic link you used earlier.</p>
+        <div style={{maxWidth:340, width:'100%'}}>
+          <h1 style={{marginBottom:12}}>MOM3NT DATA</h1>
+          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link.</p>
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e)=>setEmail(e.target.value)}
+            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #444', marginBottom:8, color:'#000'}}
+          />
+          <button
+            onClick={sendMagicLink}
+            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #111', background:'#dca636', color:'#000', fontWeight:700}}
+          >
+            Send Magic Link
+          </button>
         </div>
       </div>
     );
   }
+  // -------------------------------------------------------
 
   return (
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
@@ -379,4 +404,3 @@ export default function App() {
     </div>
   );
 }
-
