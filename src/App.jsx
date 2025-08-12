@@ -33,7 +33,11 @@ function parseHash() {
 }
 
 export default function App() {
+  // Auth/session
   const [session, setSession] = useState(null);
+
+  // Login form state (must be top-level for React hooks rules)
+  const [email, setEmail] = useState('');
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
@@ -49,8 +53,9 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link on first load (hash) ---
+  // --- Handle magic link on first load (hash) + subscribe to auth changes ---
   useEffect(() => {
+    let sub;
     (async () => {
       const h = parseHash();
 
@@ -77,20 +82,24 @@ export default function App() {
         setSession(data.session ?? null);
       }
 
-      const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-      return () => sub.subscription.unsubscribe();
+      const res = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+      sub = res.data?.subscription;
     })();
+
+    return () => {
+      if (sub) sub.unsubscribe();
+    };
   }, []);
 
   // Load entries + profile once logged in
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { data: eData } = await supabase
+      const { data: eData, error: eErr } = await supabase
         .from('entries')
         .select('*')
         .order('date', { ascending: true });
-      setEntries(eData || []);
+      if (!eErr) setEntries(eData || []);
 
       const { data: pData } = await supabase
         .from('profiles')
@@ -232,14 +241,12 @@ export default function App() {
 
   // ---------- LOGGED-OUT SCREEN WITH REAL LOGIN ----------
   if (!session) {
-    const [email, setEmail] = useState('');
-
     async function sendMagicLink() {
       if (!email) return alert('Enter your email');
-      // IMPORTANT: no emailRedirectTo here — Supabase will use your Site URL from the dashboard
+      // No emailRedirectTo here — Supabase will use your Site URL from the dashboard
       const { error } = await supabase.auth.signInWithOtp({ email });
       if (error) alert(error.message);
-      else alert('Magic link sent! Check your email on this device.');
+      else alert('Magic link sent! Check your email on this device/browser.');
     }
 
     return (
@@ -302,7 +309,7 @@ export default function App() {
               <CalendarGrid />
             </div>
 
-            {/* Selected day movement + input (BLACK TEXT) */}
+            {/* Selected day movement + input */}
             <div style={{marginTop:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                 <div>
@@ -332,4 +339,114 @@ export default function App() {
               const rows = (seriesByMovement[m.name] || []).slice(-20);
               const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
               return (
-                <div key={m.key} style={{marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,
+                <div key={m.key} style={{marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                    <div style={{fontWeight:700, color:'#000'}}>{m.name}</div>
+                    <div style={{fontSize:12,color:'#000'}}>{rows.length} entries • {m.unit}</div>
+                  </div>
+                  <div style={{width:'100%', height:220}}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+                        <CartesianGrid stroke="#e5e7eb" />
+                        <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+                        <YAxis tick={{ fill: '#000' }} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+                          labelStyle={{ color: '#000' }}
+                          itemStyle={{ color: '#000' }}
+                          labelFormatter={(label, payload) => {
+                            const p = payload && payload[0] && payload[0].payload;
+                            return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+                          }}
+                          formatter={(val) => [`${val} ${m.unit}`, 'Value']}
+                        />
+                        <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        {tab === 'leaderboard' && (
+          <section>
+            <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
+              <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
+              <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>{todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span></div>
+
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                {['male','female'].map((g) => (
+                  <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
+                    <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
+                    <ol style={{marginTop:6,display:'grid',gap:6}}>
+                      {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
+                        <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
+                          <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
+                          <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
+                        </li>
+                      )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
+                    </ol>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
+
+      {/* Profile modal */}
+      {profileOpen && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}>
+          <div style={{background:'#fff',borderRadius:12,padding:16,width:'min(92vw,420px)'}}>
+            <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>Profile</div>
+            <div style={{display:'grid',gap:8,color:'#000'}}>
+              <div>
+                <div style={{fontSize:12,color:'#000'}}>Name</div>
+                <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="First Last" style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}/>
+              </div>
+              <div>
+                <div style={{fontSize:12,color:'#000'}}>Gender</div>
+                <select value={gender} onChange={(e)=>setGender(e.target.value)} style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}>
+                  <option value="">Select</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:8}}>
+                <button
+                  onClick={()=>setProfileOpen(false)}
+                  style={{
+                    padding:'8px 12px',
+                    border:'1px solid #ccc',
+                    borderRadius:10,
+                    background:'#f0f0f0',
+                    color:'#000',
+                    cursor:'pointer'
+                  }}
+                >
+                  Close
+                </button>
+                <button
+                  onClick={saveProfile}
+                  style={{
+                    padding:'8px 12px',
+                    border:'1px solid #111',
+                    borderRadius:10,
+                    background:'#000',
+                    color:'#fff',
+                    cursor:'pointer'
+                  }}
+                >
+                  Save Profile
+                </button>
+              </div>
+              <div style={{fontSize:12,color:'#000'}}>Your name & gender are saved to your account and included with each entry for the leaderboard.</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
