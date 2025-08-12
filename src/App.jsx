@@ -54,12 +54,10 @@ export default function App() {
     (async () => {
       const h = parseHash();
 
-      // If Supabase sent an error in the hash, show it
       if (h.error_description) {
         alert(h.error_description.replace(/\+/g, ' '));
       }
 
-      // If we have tokens in the hash (magic link), set the session
       if (h.access_token && h.refresh_token) {
         try {
           const { data, error } = await supabase.auth.setSession({
@@ -71,16 +69,13 @@ export default function App() {
         } catch (e) {
           console.error('setSession threw:', e);
         } finally {
-          // Clean the URL so tokens aren’t left in the address bar
           window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
         }
       } else {
-        // No tokens in URL—load existing session (if any)
         const { data } = await supabase.auth.getSession();
         setSession(data.session ?? null);
       }
 
-      // Subscribe to future auth changes
       const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
       return () => sub.subscription.unsubscribe();
     })();
@@ -198,7 +193,6 @@ export default function App() {
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
     const start = first.getDay(); // 0 Sun
-    the: // eslint silencer
     const days = new Date(y, m+1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d+1))];
 
@@ -241,7 +235,7 @@ export default function App() {
       if (!email) return alert('Enter your email');
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: window.location.origin } // ensures redirect back to deployed site
+        options: { emailRedirectTo: window.location.origin }
       });
       if (error) alert(error.message);
       else alert('Magic link sent! Check your email.');
@@ -261,7 +255,7 @@ export default function App() {
           />
           <button
             onClick={sendMagicLink}
-            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #111', background:'#dca636', color:'#000', fontWeight:700}}
+            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid '#111', background:'#dca636', color:'#000', fontWeight:700}}
           >
             Send Magic Link
           </button>
