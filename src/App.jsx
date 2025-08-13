@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib/supabase';
+import { SITE_URL } from './config';
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 
 // Movements by weekday (units set)
@@ -36,7 +37,7 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state (must be top-level for React hooks rules)
+  // Login form state (top-level per React hooks rules)
   const [email, setEmail] = useState('');
 
   // Profile (sync with Supabase; also mirrored locally)
@@ -86,9 +87,7 @@ export default function App() {
       sub = res.data?.subscription;
     })();
 
-    return () => {
-      if (sub) sub.unsubscribe();
-    };
+    return () => { if (sub) sub.unsubscribe(); };
   }, []);
 
   // Load entries + profile once logged in
@@ -243,10 +242,13 @@ export default function App() {
   if (!session) {
     async function sendMagicLink() {
       if (!email) return alert('Enter your email');
-      // No emailRedirectTo here — Supabase will use your Site URL from the dashboard
-      const { error } = await supabase.auth.signInWithOtp({ email });
+      // Explicit redirect to the site URL you set in Supabase + Netlify env var
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: SITE_URL }
+      });
       if (error) alert(error.message);
-      else alert('Magic link sent! Check your email on this device/browser.');
+      else alert('Magic link sent! Open it on the same device/browser.');
     }
 
     return (
