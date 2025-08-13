@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { SITE_URL } from './config';
@@ -14,13 +15,11 @@ const MOVEMENTS = {
   Saturday:  { key: 'sat', name: 'Max distance 30 sec assault bike', unit: 'miles' },
 };
 
-// Helpers
 const iso = (d) => d.toISOString().slice(0,10);
 const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const range = (n) => Array.from({length: n}, (_,i) => i);
 
-// Parse #hash params like access_token, refresh_token, etc.
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
   return window.location.hash
@@ -36,13 +35,9 @@ function parseHash() {
 export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
-
-  // Login form state
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [loginStep, setLoginStep] = useState('enter-email'); // 'enter-email' | 'enter-code'
 
-  // Profile (sync with Supabase; also mirrored locally)
+  // Profile
   const [profileOpen, setProfileOpen] = useState(false);
   const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
@@ -56,38 +51,47 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link in URL (if user DID click the link) + subscribe to auth changes ---
+  // Handle both ?code=... and #access_token=... auth flows
   useEffect(() => {
     let sub;
     (async () => {
-      const h = parseHash();
-      if (h.error_description) alert(h.error_description.replace(/\+/g, ' '));
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code');
 
-      if (h.access_token && h.refresh_token) {
-        try {
-          const { data, error } = await supabase.auth.setSession({
-            access_token: h.access_token,
-            refresh_token: h.refresh_token,
-          });
-          if (error) console.error('setSession error:', error);
+        if (code) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) console.error('exchangeCodeForSession error:', error);
           setSession(data?.session ?? null);
-        } catch (e) {
-          console.error('setSession threw:', e);
-        } finally {
-          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+          window.history.replaceState({}, document.title, url.origin + url.pathname);
+        } else {
+          const h = parseHash();
+          if (h.error_description) alert(h.error_description.replace(/\+/g, ' '));
+          if (h.access_token && h.refresh_token) {
+            const { data, error } = await supabase.auth.setSession({
+              access_token: h.access_token,
+              refresh_token: h.refresh_token,
+            });
+            if (error) console.error('setSession error:', error);
+            setSession(data?.session ?? null);
+            window.history.replaceState({}, document.title, url.origin + url.pathname);
+          } else {
+            const { data } = await supabase.auth.getSession();
+            setSession(data.session ?? null);
+          }
         }
-      } else {
-        const { data } = await supabase.auth.getSession();
-        setSession(data.session ?? null);
+      } catch (e) {
+        console.error('auth bootstrap error:', e);
       }
 
       const res = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
       sub = res.data?.subscription;
     })();
+
     return () => { if (sub) sub.unsubscribe(); };
   }, []);
 
-  // Load entries + profile once logged in
+  // Load entries + profile after login
   useEffect(() => {
     if (!session) return;
     (async () => {
@@ -112,13 +116,11 @@ export default function App() {
     })();
   }, [session]);
 
-  // Keep local mirror updated
   useEffect(() => {
     localStorage.setItem('mom3nt_name', name || '');
     localStorage.setItem('mom3nt_gender', gender || '');
   }, [name, gender]);
 
-  // Save name/gender to Supabase (Upsert)
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -133,12 +135,10 @@ export default function App() {
     setProfileOpen(false);
   }
 
-  function movementForDate(d) {
-    return MOVEMENTS[dayName(d)];
-  }
+  function movementForDate(d) { return MOVEMENTS[dayName(d)]; }
 
   async function saveEntry() {
-    if (!session) return alert('Please sign in first (use magic link or code).');
+    if (!session) return alert('Please sign in first.');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
@@ -153,11 +153,9 @@ export default function App() {
       name: name.trim(),
       gender
     };
-
     const { error } = await supabase.from('entries').insert(row);
     if (error) return alert(error.message);
     setInputVal('');
-
     const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
     setEntries(data || []);
   }
@@ -167,7 +165,6 @@ export default function App() {
     return entries.filter(e => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // Build series per movement (my data only) for charts
   const seriesByMovement = useMemo(() => {
     const map = {};
     Object.values(MOVEMENTS).forEach(m => { map[m.name] = []; });
@@ -178,7 +175,6 @@ export default function App() {
     return map;
   }, [myEntries]);
 
-  // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
     const rows = entries.filter(e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female'));
@@ -194,50 +190,40 @@ export default function App() {
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
-  // --------- LOGIN UI (link OR code) ----------
+  // ---------- LOGGED-OUT SCREEN (link only, no 6-digit code) ----------
   if (!session) {
     async function sendMagicLink() {
       if (!email) return alert('Enter your email');
-      // We include a redirect to your site URL, but users can also enter the code below (no redirect needed).
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: SITE_URL }
+        options: { emailRedirectTo: `${SITE_URL}/auth/callback` }
       });
       if (error) alert(error.message);
-      else {
-        alert('Magic link sent! You can click the email link OR paste the 6-digit code below.');
-        setLoginStep('enter-code');
-      }
-    }
-
-    async function verifyCode() {
-      if (!email) return alert('Enter your email above first');
-      if (!code) return alert('Enter the 6-digit code from the email');
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: code.trim(),
-        type: 'email' // verifies a one-time email code
-      });
-      if (error) return alert(error.message);
-      setSession(data.session || null);
+      else alert('Magic link sent! Open it on the same device/browser.');
     }
 
     return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
           <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
-          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link or enter the code.</p>
+          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link.</p>
 
-          {/* Email */}
           <input
             type="email"
             placeholder="you@example.com"
             value={email}
             onChange={(e)=>setEmail(e.target.value)}
-            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #444', marginBottom:8, color:'#000'}}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #444',
+              marginBottom:8,
+              background:'#111',
+              color:'#fff'             // <-- white text on dark bg
+            }}
           />
 
-          {/* Send link */}
           <button
             onClick={sendMagicLink}
             style={{
@@ -247,50 +233,23 @@ export default function App() {
               border:'1px solid #111',
               background:'#dca636',
               color:'#000',
-              fontWeight:700,
-              marginBottom:10
-            }}
-          >
-            Send Magic Link
-          </button>
-
-          {/* OR enter code */}
-          <div style={{textAlign:'left', fontSize:12, marginBottom:6, opacity:.9}}>Have a 6-digit code from the email?</div>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            placeholder="Enter 6-digit code"
-            value={code}
-            onChange={(e)=>setCode(e.target.value)}
-            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #444', marginBottom:8, color:'#000', letterSpacing:2}}
-          />
-          <button
-            onClick={verifyCode}
-            style={{
-              width:'100%',
-              padding:'10px',
-              borderRadius:10,
-              border:'1px solid #333',
-              background:'#fff',
-              color:'#000',
               fontWeight:700
             }}
           >
-            Verify Code & Sign In
+            Send Magic Link
           </button>
         </div>
       </div>
     );
   }
-  // ---------------------------------------------
+  // -------------------------------------------------------
 
-  // Calendar grid (mobile friendly)
+  // Calendar grid
   function CalendarGrid() {
     const y = monthDate.getFullYear();
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
-    const start = first.getDay(); // 0 Sun
+    const start = first.getDay();
     const days = new Date(y, m+1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d+1))];
 
@@ -328,7 +287,7 @@ export default function App() {
 
   return (
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
-      {/* Header with top tabs + profile */}
+      {/* Header with tabs + profile + SIGN OUT */}
       <header style={{position:'sticky',top:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'12px 12px',background:'#000',color:'#fff'}}>
         <strong style={{whiteSpace:'nowrap'}}>MOM3NT DATA</strong>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
@@ -336,6 +295,12 @@ export default function App() {
           <button onClick={()=>setTab('database')}    style={{background:'transparent',color: tab==='database' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Database</button>
           <button onClick={()=>setTab('leaderboard')} style={{background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Leaderboard</button>
           <button onClick={()=>setProfileOpen(true)}  style={{background:'#111',color:'#fff',border:'1px solid #333',borderRadius:10,padding:'6px 10px'}}>Profile</button>
+          <button
+            onClick={async ()=>{ await supabase.auth.signOut(); setSession(null); }}
+            style={{background:'#dca636',color:'#000',border:'1px solid #333',borderRadius:10,padding:'6px 10px',fontWeight:700}}
+          >
+            Sign Out
+          </button>
         </div>
       </header>
 
@@ -343,7 +308,6 @@ export default function App() {
       <main style={{maxWidth:680, margin:'12px auto', padding:'0 12px 48px', color:'#000'}}>
         {tab === 'calendar' && (
           <section>
-            {/* Month switcher */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8, color:'#000'}}>
               <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()-1, 1))}>◀︎</button>
               <div style={{fontWeight:700, color:'#000'}}>{monthLabel(monthDate)}</div>
@@ -354,7 +318,6 @@ export default function App() {
               <CalendarGrid />
             </div>
 
-            {/* Selected day movement + input */}
             <div style={{marginTop:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                 <div>
@@ -382,7 +345,7 @@ export default function App() {
           <section>
             {Object.values(MOVEMENTS).map((m) => {
               const rows = (seriesByMovement[m.name] || []).slice(-20);
-              const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
+              const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
               return (
                 <div key={m.key} style={{marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)'}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
@@ -420,7 +383,6 @@ export default function App() {
             <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
               <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
               <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>{todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span></div>
-
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                 {['male','female'].map((g) => (
                   <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
@@ -462,27 +424,13 @@ export default function App() {
               <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:8}}>
                 <button
                   onClick={()=>setProfileOpen(false)}
-                  style={{
-                    padding:'8px 12px',
-                    border:'1px solid #ccc',
-                    borderRadius:10,
-                    background:'#f0f0f0',
-                    color:'#000',
-                    cursor:'pointer'
-                  }}
+                  style={{padding:'8px 12px',border:'1px solid #ccc',borderRadius:10,background:'#f0f0f0',color:'#000'}}
                 >
                   Close
                 </button>
                 <button
                   onClick={saveProfile}
-                  style={{
-                    padding:'8px 12px',
-                    border:'1px solid #111',
-                    borderRadius:10,
-                    background:'#000',
-                    color:'#fff',
-                    cursor:'pointer'
-                  }}
+                  style={{padding:'8px 12px',border:'1px solid #111',borderRadius:10,background:'#000',color:'#fff'}}
                 >
                   Save Profile
                 </button>
