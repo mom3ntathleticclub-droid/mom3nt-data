@@ -37,8 +37,10 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state (top-level per React hooks rules)
+  // Login form state
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [loginStep, setLoginStep] = useState('enter-email'); // 'enter-email' | 'enter-code'
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
@@ -54,15 +56,12 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link on first load (hash) + subscribe to auth changes ---
+  // --- Handle magic link in URL (if user DID click the link) + subscribe to auth changes ---
   useEffect(() => {
     let sub;
     (async () => {
       const h = parseHash();
-
-      if (h.error_description) {
-        alert(h.error_description.replace(/\+/g, ' '));
-      }
+      if (h.error_description) alert(h.error_description.replace(/\+/g, ' '));
 
       if (h.access_token && h.refresh_token) {
         try {
@@ -75,7 +74,6 @@ export default function App() {
         } catch (e) {
           console.error('setSession threw:', e);
         } finally {
-          // Clean the URL so tokens aren’t left in the address bar
           window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
         }
       } else {
@@ -86,7 +84,6 @@ export default function App() {
       const res = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
       sub = res.data?.subscription;
     })();
-
     return () => { if (sub) sub.unsubscribe(); };
   }, []);
 
@@ -94,11 +91,11 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { data: eData, error: eErr } = await supabase
+      const { data: eData } = await supabase
         .from('entries')
         .select('*')
         .order('date', { ascending: true });
-      if (!eErr) setEntries(eData || []);
+      setEntries(eData || []);
 
       const { data: pData } = await supabase
         .from('profiles')
@@ -141,7 +138,7 @@ export default function App() {
   }
 
   async function saveEntry() {
-    if (!session) return alert('Please sign in first (use magic link).');
+    if (!session) return alert('Please sign in first (use magic link or code).');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
@@ -197,6 +194,97 @@ export default function App() {
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
+  // --------- LOGIN UI (link OR code) ----------
+  if (!session) {
+    async function sendMagicLink() {
+      if (!email) return alert('Enter your email');
+      // We include a redirect to your site URL, but users can also enter the code below (no redirect needed).
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: SITE_URL }
+      });
+      if (error) alert(error.message);
+      else {
+        alert('Magic link sent! You can click the email link OR paste the 6-digit code below.');
+        setLoginStep('enter-code');
+      }
+    }
+
+    async function verifyCode() {
+      if (!email) return alert('Enter your email above first');
+      if (!code) return alert('Enter the 6-digit code from the email');
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: code.trim(),
+        type: 'email' // verifies a one-time email code
+      });
+      if (error) return alert(error.message);
+      setSession(data.session || null);
+    }
+
+    return (
+      <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
+        <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
+          <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
+          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link or enter the code.</p>
+
+          {/* Email */}
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e)=>setEmail(e.target.value)}
+            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #444', marginBottom:8, color:'#000'}}
+          />
+
+          {/* Send link */}
+          <button
+            onClick={sendMagicLink}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #111',
+              background:'#dca636',
+              color:'#000',
+              fontWeight:700,
+              marginBottom:10
+            }}
+          >
+            Send Magic Link
+          </button>
+
+          {/* OR enter code */}
+          <div style={{textAlign:'left', fontSize:12, marginBottom:6, opacity:.9}}>Have a 6-digit code from the email?</div>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="Enter 6-digit code"
+            value={code}
+            onChange={(e)=>setCode(e.target.value)}
+            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #444', marginBottom:8, color:'#000', letterSpacing:2}}
+          />
+          <button
+            onClick={verifyCode}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #333',
+              background:'#fff',
+              color:'#000',
+              fontWeight:700
+            }}
+          >
+            Verify Code & Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ---------------------------------------------
+
   // Calendar grid (mobile friendly)
   function CalendarGrid() {
     const y = monthDate.getFullYear();
@@ -237,51 +325,6 @@ export default function App() {
       </div>
     );
   }
-
-  // ---------- LOGGED-OUT SCREEN WITH REAL LOGIN ----------
-  if (!session) {
-    async function sendMagicLink() {
-      if (!email) return alert('Enter your email');
-      // Explicit redirect to the site URL you set in Supabase + Netlify env var
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: SITE_URL }
-      });
-      if (error) alert(error.message);
-      else alert('Magic link sent! Open it on the same device/browser.');
-    }
-
-    return (
-      <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
-        <div style={{maxWidth:340, width:'100%'}}>
-          <h1 style={{marginBottom:12}}>MOM3NT DATA</h1>
-          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link.</p>
-          <input
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e)=>setEmail(e.target.value)}
-            style={{width:'100%', padding:'10px', borderRadius:10, border:'1px solid #444', marginBottom:8, color:'#000'}}
-          />
-          <button
-            onClick={sendMagicLink}
-            style={{
-              width:'100%',
-              padding:'10px',
-              borderRadius:10,
-              border:'1px solid #111',
-              background:'#dca636',
-              color:'#000',
-              fontWeight:700
-            }}
-          >
-            Send Magic Link
-          </button>
-        </div>
-      </div>
-    );
-  }
-  // -------------------------------------------------------
 
   return (
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
