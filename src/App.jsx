@@ -40,7 +40,8 @@ export default function App() {
 
   // Login form state (code flow removed)
   const [email, setEmail] = useState('');
-  const [pasted, setPasted] = useState(''); // NEW: paste magic link or code
+  const [otp, setOtp] = useState('');       // NEW: 6-digit code
+
 
 
   // Profile (sync with Supabase; also mirrored locally)
@@ -206,104 +207,17 @@ export default function App() {
       if (error) alert(error.message);
       else alert('Magic link sent! Open it on the same device/browser.');
     }
-async function signInWithPasted() {
-  const raw = (pasted || '').trim();
-  if (!raw) return alert('Paste the email link or the code');
-  if (!email) return alert('Enter your email above first.');
+async function verifySixDigitCode() {
+  if (!email) return alert('Enter your email above first');
+  if (!/^\d{6}$/.test(otp.trim())) return alert('Enter the 6-digit code from the email');
 
-  let code = null;
-  let token = null;
-  let token_hash = null;
-  let type = null;
-  let access_token = null;
-  let refresh_token = null;
-
-  // Try parsing as a URL
-  try {
-    const u = new URL(raw);
-    const sp = u.searchParams;
-
-    // 1) PKCE code: /?code=...
-    code = sp.get('code');
-
-    // 2) Magic link variants:
-    //    /verify?type=magiclink&token=...   (your link)
-    //    /verify?type=magiclink&token_hash=...
-    token = sp.get('token');
-    token_hash = sp.get('token_hash');
-    type = sp.get('type');
-
-    // 3) Hash tokens: #access_token=...&refresh_token=...
-    if (u.hash && u.hash.length > 1) {
-      const hp = new URLSearchParams(u.hash.substring(1));
-      access_token = hp.get('access_token');
-      refresh_token = hp.get('refresh_token');
-    }
-  } catch {
-    // Not a URL; maybe it’s just a 6-digit code
-  }
-
-  try {
-    // A) Direct hash tokens (PWA friendly)
-    if (access_token && refresh_token) {
-      const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
-      if (error) throw error;
-      setSession(data?.session || null);
-      return;
-    }
-
-    // B) PKCE code (/?code=...)
-    if (code) {
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-      setSession(data?.session || null);
-      return;
-    }
-
-    // C) Magic link with token or token_hash
-    if ((token || token_hash) && (type === 'magiclink' || type === 'recovery' || type === 'email_change')) {
-      // Try token first (email required)…
-      if (token) {
-        const { data, error } = await supabase.auth.verifyOtp({
-          email,
-          token,
-          type // 'magiclink'
-        });
-        if (!error) {
-          setSession(data?.session || null);
-          return;
-        }
-        // If token didn’t work, fall through and try token_hash style.
-      }
-      // …then try token_hash variant (no email needed)
-      const { data, error } = await supabase.auth.verifyOtp({
-        token_hash: token_hash || token, // use whichever we have
-        type // 'magiclink'
-      });
-      if (error) throw error;
-      setSession(data?.session || null);
-      return;
-    }
-
-    // D) Raw 6-digit code (email OTP)
-    if (/^\d{6}$/.test(raw)) {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: raw,
-        type: 'email'
-      });
-      if (error) throw error;
-      setSession(data?.session || null);
-      return;
-    }
-  } catch (e) {
-    alert(e.message);
-    return;
-  }
-
-  alert('Could not find a token or code. Copy the full link from the email and paste it here.');
-}
-    return (
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token: otp.trim(),
+    type: 'email' // 6-digit email verification
+  });
+  if (error) return alert(error.message);
+  setSession(data?.session || null);    return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
           <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
