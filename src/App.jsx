@@ -38,8 +38,9 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state (code flow removed)
+  // Login form state
   const [email, setEmail] = useState('');
+  const [pasted, setPasted] = useState(''); // NEW: paste link or code (PWA-friendly)
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
@@ -55,7 +56,7 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link in URL (if user DID click the link) + subscribe to auth changes ---
+  // --- Handle magic link tokens in URL (if opened in-browser) + subscribe to auth changes ---
   useEffect(() => {
     let sub;
     (async () => {
@@ -137,7 +138,7 @@ export default function App() {
   }
 
   async function saveEntry() {
-    if (!session) return alert('Please sign in first (use magic link).');
+    if (!session) return alert('Please sign in first.');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
@@ -193,23 +194,43 @@ export default function App() {
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
-  // --------- LOGIN UI (link only; no code) ----------
+  // --------- LOGGED-OUT SCREEN (PWA-friendly quick fix) ----------
   if (!session) {
     async function sendMagicLink() {
       if (!email) return alert('Enter your email');
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: SITE_URL } // keep your working redirect
+        options: { emailRedirectTo: SITE_URL } // your working redirect (e.g., https://mom3ntdata.netlify.app)
       });
       if (error) alert(error.message);
-      else alert('Magic link sent! Open it on the same device/browser.');
+      else alert('Magic link sent! On iPhone Home Screen: press-and-hold the email link → Copy, then paste it below.');
+    }
+
+    async function signInWithPasted() {
+      const raw = (pasted || '').trim();
+      if (!raw) return alert('Paste the email link or the code');
+
+      // Try URL first: /auth/callback?code=XYZ
+      let code = '';
+      try {
+        const u = new URL(raw);
+        code = u.searchParams.get('code') || '';
+      } catch {
+        // Not a URL; maybe they pasted just the code
+        code = raw;
+      }
+      if (!code) return alert('Could not find a code. Paste the full link or the code from the email.');
+
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) return alert(error.message);
+      setSession(data?.session || null);
     }
 
     return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
           <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
-          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link.</p>
+          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link. iPhone PWA tip: paste the link below.</p>
 
           {/* Email (white text on dark bg) */}
           <input
@@ -238,16 +259,50 @@ export default function App() {
               border:'1px solid #111',
               background:'#dca636',
               color:'#000',
-              fontWeight:700
+              fontWeight:700,
+              marginBottom:12
             }}
           >
             Send Magic Link
+          </button>
+
+          {/* Paste link or code (PWA-friendly) */}
+          <div style={{textAlign:'left', fontSize:12, marginBottom:6, opacity:.9}}>Or paste the email link (or just the code):</div>
+          <input
+            type="text"
+            placeholder="Paste magic link or code here"
+            value={pasted}
+            onChange={(e)=>setPasted(e.target.value)}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #444',
+              marginBottom:8,
+              background:'#111',
+              color:'#fff',
+              letterSpacing:1
+            }}
+          />
+          <button
+            onClick={signInWithPasted}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #333',
+              background:'#fff',
+              color:'#000',
+              fontWeight:700
+            }}
+          >
+            Sign In with Pasted Link/Code
           </button>
         </div>
       </div>
     );
   }
-  // ---------------------------------------------
+  // -------------------------------------------------------------
 
   // Calendar grid (mobile friendly)
   function CalendarGrid() {
@@ -255,6 +310,7 @@ export default function App() {
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
     const start = first.getDay(); // 0 Sun
+    the:
     const days = new Date(y, m+1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d+1))];
 
@@ -399,69 +455,5 @@ export default function App() {
                       {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
                         <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
                           <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
-                          <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
-                        </li>
-                      )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
-                    </ol>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-      </main>
+                          <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {tod
 
-      {/* Profile modal */}
-      {profileOpen && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}>
-          <div style={{background:'#fff',borderRadius:12,padding:16,width:'min(92vw,420px)'}}>
-            <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>Profile</div>
-            <div style={{display:'grid',gap:8,color:'#000'}}>
-              <div>
-                <div style={{fontSize:12,color:'#000'}}>Name</div>
-                <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="First Last" style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}/>
-              </div>
-              <div>
-                <div style={{fontSize:12,color:'#000'}}>Gender</div>
-                <select value={gender} onChange={(e)=>setGender(e.target.value)} style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}>
-                  <option value="">Select</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                </select>
-              </div>
-              <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:8}}>
-                <button
-                  onClick={()=>setProfileOpen(false)}
-                  style={{
-                    padding:'8px 12px',
-                    border:'1px solid #ccc',
-                    borderRadius:10,
-                    background:'#f0f0f0',
-                    color:'#000',
-                    cursor:'pointer'
-                  }}
-                >
-                  Close
-                </button>
-                <button
-                  onClick={saveProfile}
-                  style={{
-                    padding:'8px 12px',
-                    border:'1px solid #111',
-                    borderRadius:10,
-                    background:'#000',
-                    color:'#fff',
-                    cursor:'pointer'
-                  }}
-                >
-                  Save Profile
-                </button>
-              </div>
-              <div style={{fontSize:12,color:'#000'}}>Your name & gender are saved to your account and included with each entry for the leaderboard.</div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
