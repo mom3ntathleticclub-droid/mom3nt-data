@@ -16,12 +16,12 @@ const MOVEMENTS = {
 };
 
 // Helpers
-const iso = (d) => d.toISOString().slice(0,10);
+const iso = (d) => d.toISOString().slice(0, 10);
 const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-const range = (n) => Array.from({length: n}, (_,i) => i);
+const range = (n) => Array.from({ length: n }, (_, i) => i);
 
-// Parse #hash params like access_token, refresh_token, etc.
+// Parse #hash params like access_token, refresh_token, etc. (when link opens in browser)
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
   return window.location.hash
@@ -38,27 +38,26 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state (code flow removed)
-  const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');       // NEW: 6-digit code
+  // Login state (supports magic link, paste, and 6-digit OTP)
+  const [email, setEmail]     = useState('');
+  const [pasted, setPasted]   = useState(''); // paste magic link or code
+  const [otp, setOtp]         = useState(''); // 6-digit code
 
-
-
-  // Profile (sync with Supabase; also mirrored locally)
+  // Profile (also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
-  const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
+  const [name,   setName]   = useState(localStorage.getItem('mom3nt_name')   || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
 
   // UI
-  const [tab, setTab] = useState('calendar'); // calendar | database | leaderboard
-  const [monthDate, setMonthDate] = useState(new Date());
+  const [tab, setTab]                 = useState('calendar'); // calendar | database | leaderboard
+  const [monthDate, setMonthDate]     = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [inputVal, setInputVal] = useState('');
+  const [inputVal, setInputVal]       = useState('');
 
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link in URL (if user DID click the link) + subscribe to auth changes ---
+  // Handle magic link tokens (if opened in browser) + subscribe to auth changes
   useEffect(() => {
     let sub;
     (async () => {
@@ -76,7 +75,9 @@ export default function App() {
         } catch (e) {
           console.error('setSession threw:', e);
         } finally {
-          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+          // remove hash/query from URL
+          const url = new URL(window.location.href);
+          window.history.replaceState({}, document.title, url.origin + url.pathname);
         }
       } else {
         const { data } = await supabase.auth.getSession();
@@ -106,9 +107,9 @@ export default function App() {
         .maybeSingle();
 
       if (pData) {
-        if (pData.name) setName(pData.name);
+        if (pData.name)   setName(pData.name);
         if (pData.gender) setGender(pData.gender);
-        localStorage.setItem('mom3nt_name', pData.name || '');
+        localStorage.setItem('mom3nt_name',   pData.name   || '');
         localStorage.setItem('mom3nt_gender', pData.gender || '');
       }
     })();
@@ -116,11 +117,11 @@ export default function App() {
 
   // Keep local mirror updated
   useEffect(() => {
-    localStorage.setItem('mom3nt_name', name || '');
+    localStorage.setItem('mom3nt_name',   name   || '');
     localStorage.setItem('mom3nt_gender', gender || '');
   }, [name, gender]);
 
-  // Save name/gender to Supabase (Upsert)
+  // Save profile
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -139,8 +140,9 @@ export default function App() {
     return MOVEMENTS[dayName(d)];
   }
 
+  // Save an entry
   async function saveEntry() {
-    if (!session) return alert('Please sign in first (use magic link).');
+    if (!session) return alert('Please sign in first.');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
@@ -164,12 +166,137 @@ export default function App() {
     setEntries(data || []);
   }
 
+  // LOGIN helpers
+  async function sendMagicLink() {
+    if (!email) return alert('Enter your email');
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: SITE_URL } // your deployed URL
+    });
+    if (error) alert(error.message);
+    else alert('Magic link sent!\n\niPhone PWA tip: press-and-hold the email link → Copy Link.\nReturn here and paste below, or use the 6-digit code.');
+  }
+
+  // Robust paste handler: handles ?code=, ?token[_hash]=, and #access_token
+  async function signInWithPasted() {
+    const raw = (pasted || '').trim();
+    if (!raw) return alert('Paste the email link or the code');
+    if (!email) return alert('Enter your email above first.');
+
+    let code = null;
+    let token = null;
+    let token_hash = null;
+    let type = null;
+    let access_token = null;
+    let refresh_token = null;
+
+    // Try parsing as a URL
+    try {
+      const u = new URL(raw);
+      const sp = u.searchParams;
+
+      // 1) PKCE code: /?code=...
+      code = sp.get('code');
+
+      // 2) Magic link variants:
+      //    /verify?type=magiclink&token=...
+      //    /verify?type=magiclink&token_hash=...
+      token = sp.get('token');
+      token_hash = sp.get('token_hash');
+      type = sp.get('type');
+
+      // 3) Hash tokens: #access_token=...&refresh_token=...
+      if (u.hash && u.hash.length > 1) {
+        const hp = new URLSearchParams(u.hash.substring(1));
+        access_token = hp.get('access_token');
+        refresh_token = hp.get('refresh_token');
+      }
+    } catch {
+      // Not a URL; maybe it’s just a 6-digit code
+    }
+
+    try {
+      // A) Direct hash tokens (PWA friendly)
+      if (access_token && refresh_token) {
+        const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) throw error;
+        setSession(data?.session || null);
+        return;
+      }
+
+      // B) PKCE code (/?code=...)
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        setSession(data?.session || null);
+        return;
+      }
+
+      // C) Magic link with token or token_hash
+      if ((token || token_hash) && (type === 'magiclink' || type === 'recovery' || type === 'email_change')) {
+        // Try token first (email required)…
+        if (token) {
+          const { data, error } = await supabase.auth.verifyOtp({
+            email,
+            token,
+            type // 'magiclink'
+          });
+          if (!error) {
+            setSession(data?.session || null);
+            return;
+          }
+          // If token didn’t work, fall through and try token_hash style.
+        }
+        // …then try token_hash variant (no email needed)
+        const { data, error } = await supabase.auth.verifyOtp({
+          token_hash: token_hash || token,
+          type // 'magiclink'
+        });
+        if (error) throw error;
+        setSession(data?.session || null);
+        return;
+      }
+
+      // D) Raw 6-digit code (email OTP)
+      if (/^\d{6}$/.test(raw)) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          email,
+          token: raw,
+          type: 'email'
+        });
+        if (error) throw error;
+        setSession(data?.session || null);
+        return;
+      }
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+
+    alert('Could not find a token or code. Copy the full link (or code) from the email and paste it here.');
+  }
+
+  // 6-digit email code (best for iPhone PWA)
+  async function verifySixDigitCode() {
+    if (!email) return alert('Enter your email above first');
+    if (!/^\d{6}$/.test(otp.trim())) return alert('Enter the 6-digit code from the email');
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token: otp.trim(),
+      type: 'email'
+    });
+    if (error) return alert(error.message);
+    setSession(data?.session || null);
+  }
+
+  // My entries only
   const myEntries = useMemo(() => {
     if (!session) return [];
     return entries.filter(e => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // Build series per movement (my data only) for charts
+  // Series per movement (my data only)
   const seriesByMovement = useMemo(() => {
     const map = {};
     Object.values(MOVEMENTS).forEach(m => { map[m.name] = []; });
@@ -180,7 +307,7 @@ export default function App() {
     return map;
   }, [myEntries]);
 
-  // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
+  // Leaderboard for today — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
     const rows = entries.filter(e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female'));
@@ -196,32 +323,13 @@ export default function App() {
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
-  // --------- LOGIN UI (link only; no code) ----------
+  // --------- LOGGED-OUT UI ----------
   if (!session) {
-    async function sendMagicLink() {
-      if (!email) return alert('Enter your email');
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: SITE_URL } // keep your working redirect
-      });
-      if (error) alert(error.message);
-      else alert('Magic link sent! Open it on the same device/browser.');
-    }
-async function verifySixDigitCode() {
-  if (!email) return alert('Enter your email above first');
-  if (!/^\d{6}$/.test(otp.trim())) return alert('Enter the 6-digit code from the email');
-
-  const { data, error } = await supabase.auth.verifyOtp({
-    email,
-    token: otp.trim(),
-    type: 'email' // 6-digit email verification
-  });
-  if (error) return alert(error.message);
-  setSession(data?.session || null);    return (
+    return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
           <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
-          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link.</p>
+          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link, paste the link/code, or use the 6-digit code.</p>
 
           {/* Email (white text on dark bg) */}
           <input
@@ -255,46 +363,84 @@ async function verifySixDigitCode() {
           >
             Send Magic Link
           </button>
-{/* PWA-friendly: paste the magic link or just the code */}
-<div style={{textAlign:'left', fontSize:12, marginTop:10, marginBottom:6, opacity:.9}}>
-  Or paste the email link (or just the code):
-</div>
-<input
-  type="text"
-  placeholder="Paste magic link or code here"
-  value={pasted}
-  onChange={(e)=>setPasted(e.target.value)}
-  style={{
-    width:'100%',
-    padding:'10px',
-    borderRadius:10,
-    border:'1px solid #444',
-    marginBottom:8,
-    background:'#111',
-    color:'#fff',
-    letterSpacing:1
-  }}
-/>
-<button
-  onClick={signInWithPasted}
-  style={{
-    width:'100%',
-    padding:'10px',
-    borderRadius:10,
-    border:'1px solid #333',
-    background:'#fff',
-    color:'#000',
-    fontWeight:700
-  }}
->
-  Sign In with Pasted Link/Code
-</button>
 
+          {/* Paste link or code */}
+          <div style={{textAlign:'left', fontSize:12, marginTop:12, marginBottom:6, opacity:.9}}>
+            Or paste the email link (or just the code):
+          </div>
+          <input
+            type="text"
+            placeholder="Paste magic link or code here"
+            value={pasted}
+            onChange={(e)=>setPasted(e.target.value)}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #444',
+              marginBottom:8,
+              background:'#111',
+              color:'#fff',
+              letterSpacing:1
+            }}
+          />
+          <button
+            onClick={signInWithPasted}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #333',
+              background:'#fff',
+              color:'#000',
+              fontWeight:700
+            }}
+          >
+            Sign In with Pasted Link/Code
+          </button>
+
+          {/* 6-digit code (most reliable for iPhone PWA) */}
+          <div style={{textAlign:'left', fontSize:12, marginTop:12, marginBottom:6, opacity:.9}}>
+            Or enter the 6-digit code from the email:
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="Enter 6-digit code"
+            value={otp}
+            onChange={(e)=>setOtp(e.target.value)}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #444',
+              marginBottom:8,
+              background:'#111',
+              color:'#fff',
+              letterSpacing:2,
+              textAlign:'center'
+            }}
+          />
+          <button
+            onClick={verifySixDigitCode}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #333',
+              background:'#fff',
+              color:'#000',
+              fontWeight:700
+            }}
+          >
+            Sign In with Code
+          </button>
         </div>
       </div>
     );
   }
-  // ---------------------------------------------
+  // -----------------------------------
 
   // Calendar grid (mobile friendly)
   function CalendarGrid() {
@@ -302,8 +448,8 @@ async function verifySixDigitCode() {
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
     const start = first.getDay(); // 0 Sun
-    const days = new Date(y, m+1, 0).getDate();
-    const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d+1))];
+    const days = new Date(y, m + 1, 0).getDate();
+    const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d + 1))];
 
     return (
       <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:6}}>
@@ -324,192 +470,4 @@ async function verifySixDigitCode() {
                 background: sel ? '#000' : '#fff',
                 color: sel ? '#fff' : '#111',
                 outline: today ? '2px solid #dca636' : 'none',
-                display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'
-              }}
-              title={mov.name}
-            >
-              <div style={{fontWeight:600,fontSize:14}}>{d.getDate()}</div>
-              <div style={{fontSize:10,opacity:.7,maxWidth:'9ch',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{mov.name}</div>
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
-      {/* Header with top tabs + profile + sign out */}
-      <header style={{position:'sticky',top:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'12px 12px',background:'#000',color:'#fff'}}>
-        <strong style={{whiteSpace:'nowrap'}}>MOM3NT DATA</strong>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
-          <button onClick={()=>setTab('calendar')}    style={{background:'transparent',color: tab==='calendar' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Calendar</button>
-          <button onClick={()=>setTab('database')}    style={{background:'transparent',color: tab==='database' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Database</button>
-          <button onClick={()=>setTab('leaderboard')} style={{background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Leaderboard</button>
-          <button onClick={()=>setProfileOpen(true)}  style={{background:'#111',color:'#fff',border:'1px solid #333',borderRadius:10,padding:'6px 10px'}}>Profile</button>
-          <button
-            onClick={async ()=>{ await supabase.auth.signOut(); setSession(null); }}
-            style={{background:'#dca636',color:'#000',border:'1px solid #333',borderRadius:10,padding:'6px 10px',fontWeight:700}}
-          >
-            Sign Out
-          </button>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main style={{maxWidth:680, margin:'12px auto', padding:'0 12px 48px', color:'#000'}}>
-        {tab === 'calendar' && (
-          <section>
-            {/* Month switcher */}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8, color:'#000'}}>
-              <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()-1, 1))}>◀︎</button>
-              <div style={{fontWeight:700, color:'#000'}}>{monthLabel(monthDate)}</div>
-              <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()+1, 1))}>▶︎</button>
-            </div>
-
-            <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <CalendarGrid />
-            </div>
-
-            {/* Selected day movement + input */}
-            <div style={{marginTop:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                <div>
-                  <div style={{fontSize:12,color:'#000'}}>Selected: {iso(selectedDate)}</div>
-                  <div style={{fontWeight:700,color:'#000'}}>{movementForDate(selectedDate).name}</div>
-                  <div style={{fontSize:12,color:'#000'}}>Units: {movementForDate(selectedDate).unit}</div>
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    placeholder={`Enter ${movementForDate(selectedDate).unit}`}
-                    value={inputVal}
-                    onChange={(e)=>setInputVal(e.target.value)}
-                    style={{padding:10,border:'1px solid #ddd',borderRadius:10,width:140}}
-                  />
-                  <button onClick={saveEntry} style={{padding:'10px 12px',borderRadius:10,background:'#000',color:'#fff'}}>Save</button>
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {tab === 'database' && (
-          <section>
-            {Object.values(MOVEMENTS).map((m) => {
-              const rows = (seriesByMovement[m.name] || []).slice(-20);
-              const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
-              return (
-                <div key={m.key} style={{marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                    <div style={{fontWeight:700, color:'#000'}}>{m.name}</div>
-                    <div style={{fontSize:12,color:'#000'}}>{rows.length} entries • {m.unit}</div>
-                  </div>
-                  <div style={{width:'100%', height:220}}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                        <CartesianGrid stroke="#e5e7eb" />
-                        <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                        <YAxis tick={{ fill: '#000' }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                          labelStyle={{ color: '#000' }}
-                          itemStyle={{ color: '#000' }}
-                          labelFormatter={(label, payload) => {
-                            const p = payload && payload[0] && payload[0].payload;
-                            return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                          }}
-                          formatter={(val) => [`${val} ${m.unit}`, 'Value']}
-                        />
-                        <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-        )}
-
-        {tab === 'leaderboard' && (
-          <section>
-            <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
-              <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>{todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span></div>
-
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                {['male','female'].map((g) => (
-                  <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
-                    <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
-                    <ol style={{marginTop:6,display:'grid',gap:6}}>
-                      {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
-                        <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
-                          <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
-                          <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
-                        </li>
-                      )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
-                    </ol>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-      </main>
-
-      {/* Profile modal */}
-      {profileOpen && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}>
-          <div style={{background:'#fff',borderRadius:12,padding:16,width:'min(92vw,420px)'}}>
-            <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>Profile</div>
-            <div style={{display:'grid',gap:8,color:'#000'}}>
-              <div>
-                <div style={{fontSize:12,color:'#000'}}>Name</div>
-                <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="First Last" style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}/>
-              </div>
-              <div>
-                <div style={{fontSize:12,color:'#000'}}>Gender</div>
-                <select value={gender} onChange={(e)=>setGender(e.target.value)} style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}>
-                  <option value="">Select</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                </select>
-              </div>
-              <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:8}}>
-                <button
-                  onClick={()=>setProfileOpen(false)}
-                  style={{
-                    padding:'8px 12px',
-                    border:'1px solid #ccc',
-                    borderRadius:10,
-                    background:'#f0f0f0',
-                    color:'#000',
-                    cursor:'pointer'
-                  }}
-                >
-                  Close
-                </button>
-                <button
-                  onClick={saveProfile}
-                  style={{
-                    padding:'8px 12px',
-                    border:'1px solid #111',
-                    borderRadius:10,
-                    background:'#000',
-                    color:'#fff',
-                    cursor:'pointer'
-                  }}
-                >
-                  Save Profile
-                </button>
-              </div>
-              <div style={{fontSize:12,color:'#000'}}>Your name & gender are saved to your account and included with each entry for the leaderboard.</div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+                display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center
