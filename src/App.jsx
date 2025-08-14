@@ -40,7 +40,6 @@ export default function App() {
 
   // Login form state (code flow removed)
   const [email, setEmail] = useState('');
-  const [email, setEmail] = useState('');
   const [pasted, setPasted] = useState(''); // NEW: paste magic link or code
 
 
