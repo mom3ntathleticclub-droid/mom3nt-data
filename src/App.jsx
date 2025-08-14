@@ -38,8 +38,9 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state (code flow removed)
+  // Login form state
   const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState(''); // NEW: 6-digit code
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
@@ -137,7 +138,7 @@ export default function App() {
   }
 
   async function saveEntry() {
-    if (!session) return alert('Please sign in first (use magic link).');
+    if (!session) return alert('Please sign in first (use code).');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
@@ -193,23 +194,38 @@ export default function App() {
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
-  // --------- LOGIN UI (link only; no code) ----------
+  // ---------- LOGIN UI: email + 6-digit code ----------
   if (!session) {
-    async function sendMagicLink() {
+    // Send email that contains a 6-digit code (and a magic link you can ignore)
+    async function sendCode() {
       if (!email) return alert('Enter your email');
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: SITE_URL } // keep your working redirect
+        options: { emailRedirectTo: SITE_URL } // fine to leave; we’re using the code in-app
       });
       if (error) alert(error.message);
-      else alert('Magic link sent! Open it on the same device/browser.');
+      else alert('Code sent! Check your email for the 6-digit code.');
+    }
+
+    // Verify the 6-digit code (PWA/iPhone friendly)
+    async function verifySixDigitCode() {
+      if (!email) return alert('Enter your email above first');
+      if (!/^\d{6}$/.test((otp || '').trim())) return alert('Enter the 6-digit code from the email');
+
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: otp.trim(),
+        type: 'email'
+      });
+      if (error) return alert(error.message);
+      setSession(data?.session || null);
     }
 
     return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
           <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
-          <p style={{marginBottom:12, opacity:.9}}>Sign in with a magic link.</p>
+          <p style={{marginBottom:12, opacity:.9}}>Sign in with the 6-digit code sent to your email.</p>
 
           {/* Email (white text on dark bg) */}
           <input
@@ -228,9 +244,9 @@ export default function App() {
             }}
           />
 
-          {/* Send link */}
+          {/* Send code */}
           <button
-            onClick={sendMagicLink}
+            onClick={sendCode}
             style={{
               width:'100%',
               padding:'10px',
@@ -238,10 +254,48 @@ export default function App() {
               border:'1px solid #111',
               background:'#dca636',
               color:'#000',
+              fontWeight:700,
+              marginBottom:12
+            }}
+          >
+            Send Code
+          </button>
+
+          {/* Enter 6-digit code */}
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            placeholder="Enter 6-digit code"
+            value={otp}
+            onChange={(e)=>setOtp(e.target.value)}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #444',
+              marginBottom:8,
+              background:'#111',
+              color:'#fff',
+              letterSpacing:2,
+              textAlign:'center',
+              fontWeight:700
+            }}
+          />
+          <button
+            onClick={verifySixDigitCode}
+            style={{
+              width:'100%',
+              padding:'10px',
+              borderRadius:10,
+              border:'1px solid #333',
+              background:'#fff',
+              color:'#000',
               fontWeight:700
             }}
           >
-            Send Magic Link
+            Verify & Sign In
           </button>
         </div>
       </div>
@@ -465,4 +519,3 @@ export default function App() {
     </div>
   );
 }
-
