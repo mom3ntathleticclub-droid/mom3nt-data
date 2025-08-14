@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { SITE_URL } from './config';
@@ -21,7 +20,7 @@ const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const range = (n) => Array.from({length: n}, (_,i) => i);
 
-// Parse #hash params like access_token, refresh_token, etc. (when link opens in browser)
+// Parse #hash params like access_token, refresh_token, etc.
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
   return window.location.hash
@@ -38,25 +37,24 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form (PWA-friendly)
-  const [email, setEmail]   = useState('');
-  const [pasted, setPasted] = useState(''); // paste the email link or code
+  // Login form state (code removed)
+  const [email, setEmail] = useState('');
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
-  const [name,   setName]   = useState(localStorage.getItem('mom3nt_name')   || '');
+  const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
 
   // UI
   const [tab, setTab] = useState('calendar'); // calendar | database | leaderboard
-  const [monthDate,    setMonthDate]    = useState(new Date());
+  const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [inputVal,     setInputVal]     = useState('');
+  const [inputVal, setInputVal] = useState('');
 
   // Data
   const [entries, setEntries] = useState([]);
 
-  // Handle magic link tokens (if opened in browser) + subscribe to auth changes
+  // --- Handle magic link in URL (if user DID click the link) + subscribe to auth changes ---
   useEffect(() => {
     let sub;
     (async () => {
@@ -74,9 +72,7 @@ export default function App() {
         } catch (e) {
           console.error('setSession threw:', e);
         } finally {
-          // remove hash/query from URL
-          const url = new URL(window.location.href);
-          window.history.replaceState({}, document.title, url.origin + url.pathname);
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
         }
       } else {
         const { data } = await supabase.auth.getSession();
@@ -106,9 +102,9 @@ export default function App() {
         .maybeSingle();
 
       if (pData) {
-        if (pData.name)   setName(pData.name);
+        if (pData.name) setName(pData.name);
         if (pData.gender) setGender(pData.gender);
-        localStorage.setItem('mom3nt_name',   pData.name   || '');
+        localStorage.setItem('mom3nt_name', pData.name || '');
         localStorage.setItem('mom3nt_gender', pData.gender || '');
       }
     })();
@@ -116,11 +112,11 @@ export default function App() {
 
   // Keep local mirror updated
   useEffect(() => {
-    localStorage.setItem('mom3nt_name',   name   || '');
+    localStorage.setItem('mom3nt_name', name || '');
     localStorage.setItem('mom3nt_gender', gender || '');
   }, [name, gender]);
 
-  // Save profile
+  // Save name/gender to Supabase (Upsert)
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -139,9 +135,8 @@ export default function App() {
     return MOVEMENTS[dayName(d)];
   }
 
-  // Save an entry
   async function saveEntry() {
-    if (!session) return alert('Please sign in first.');
+    if (!session) return alert('Please sign in first (use magic link).');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
@@ -165,13 +160,12 @@ export default function App() {
     setEntries(data || []);
   }
 
-  // My entries only
   const myEntries = useMemo(() => {
     if (!session) return [];
     return entries.filter(e => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // Series per movement (my data only)
+  // Build series per movement (my data only) for charts
   const seriesByMovement = useMemo(() => {
     const map = {};
     Object.values(MOVEMENTS).forEach(m => { map[m.name] = []; });
@@ -182,7 +176,35 @@ export default function App() {
     return map;
   }, [myEntries]);
 
-  // Leaderboard for today — Top 5 per gender, one record per person (best)
+  // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
-  const leaderboard = useMemo(() =>
+  const leaderboard = useMemo(() => {
+    const rows = entries.filter(e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female'));
+    const bestMale = new Map();
+    const bestFemale = new Map();
+    for (const r of rows) {
+      const key = (r.name || 'Member').trim() || 'Member';
+      const bucket = r.gender === 'male' ? bestMale : bestFemale;
+      const prev = bucket.get(key);
+      if (!prev || Number(r.value) > Number(prev.value)) bucket.set(key, r);
+    }
+    const top5 = (m) => Array.from(m.values()).sort((a,b)=>Number(b.value)-Number(a.value)).slice(0,5);
+    return { male: top5(bestMale), female: top5(bestFemale) };
+  }, [entries, todaysMovement.name]);
 
+  // --------- LOGIN UI (link only; code removed) ----------
+  if (!session) {
+    async function sendMagicLink() {
+      if (!email) return alert('Enter your email');
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: SITE_URL } // keep as in your working version
+      });
+      if (error) alert(error.message);
+      else alert('Magic link sent! Open it on the same device/browser.');
+    }
+
+    return (
+      <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
+        <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
+         
