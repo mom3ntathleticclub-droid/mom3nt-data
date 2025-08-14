@@ -21,7 +21,7 @@ const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const range = (n) => Array.from({length: n}, (_,i) => i);
 
-// Parse #hash params like access_token, refresh_token, etc.
+// Parse #hash params like access_token, refresh_token, etc. (when link opens in browser)
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
   return window.location.hash
@@ -38,25 +38,25 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state (PWA-friendly)
-  const [email, setEmail] = useState('');
-  const [pasted, setPasted] = useState(''); // paste link or code
+  // Login form (PWA-friendly)
+  const [email, setEmail]   = useState('');
+  const [pasted, setPasted] = useState(''); // paste the email link or code
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
-  const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
+  const [name,   setName]   = useState(localStorage.getItem('mom3nt_name')   || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
 
   // UI
   const [tab, setTab] = useState('calendar'); // calendar | database | leaderboard
-  const [monthDate, setMonthDate] = useState(new Date());
+  const [monthDate,    setMonthDate]    = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [inputVal, setInputVal] = useState('');
+  const [inputVal,     setInputVal]     = useState('');
 
   // Data
   const [entries, setEntries] = useState([]);
 
-  // Handle magic link tokens if opened in-browser + subscribe to auth changes
+  // Handle magic link tokens (if opened in browser) + subscribe to auth changes
   useEffect(() => {
     let sub;
     (async () => {
@@ -74,7 +74,9 @@ export default function App() {
         } catch (e) {
           console.error('setSession threw:', e);
         } finally {
-          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+          // remove hash/query from URL
+          const url = new URL(window.location.href);
+          window.history.replaceState({}, document.title, url.origin + url.pathname);
         }
       } else {
         const { data } = await supabase.auth.getSession();
@@ -104,9 +106,9 @@ export default function App() {
         .maybeSingle();
 
       if (pData) {
-        if (pData.name) setName(pData.name);
+        if (pData.name)   setName(pData.name);
         if (pData.gender) setGender(pData.gender);
-        localStorage.setItem('mom3nt_name', pData.name || '');
+        localStorage.setItem('mom3nt_name',   pData.name   || '');
         localStorage.setItem('mom3nt_gender', pData.gender || '');
       }
     })();
@@ -114,11 +116,11 @@ export default function App() {
 
   // Keep local mirror updated
   useEffect(() => {
-    localStorage.setItem('mom3nt_name', name || '');
+    localStorage.setItem('mom3nt_name',   name   || '');
     localStorage.setItem('mom3nt_gender', gender || '');
   }, [name, gender]);
 
-  // Save name/gender to Supabase (Upsert)
+  // Save profile
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -137,5 +139,50 @@ export default function App() {
     return MOVEMENTS[dayName(d)];
   }
 
+  // Save an entry
   async function saveEntry() {
-    if (!session
+    if (!session) return alert('Please sign in first.');
+    if (!name.trim() || !gender) { setProfileOpen(true); return; }
+    const v = parseFloat(inputVal);
+    if (!v || v <= 0) return alert('Enter a positive number.');
+
+    const mov = movementForDate(selectedDate);
+    const row = {
+      user_id: session.user.id,
+      date: iso(selectedDate),
+      movement: mov.name,
+      value: v,
+      unit: mov.unit,
+      name: name.trim(),
+      gender
+    };
+
+    const { error } = await supabase.from('entries').insert(row);
+    if (error) return alert(error.message);
+    setInputVal('');
+
+    const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
+    setEntries(data || []);
+  }
+
+  // My entries only
+  const myEntries = useMemo(() => {
+    if (!session) return [];
+    return entries.filter(e => e.user_id === session.user.id);
+  }, [entries, session]);
+
+  // Series per movement (my data only)
+  const seriesByMovement = useMemo(() => {
+    const map = {};
+    Object.values(MOVEMENTS).forEach(m => { map[m.name] = []; });
+    for (const e of myEntries) {
+      map[e.movement]?.push({ date: e.date, value: Number(e.value) });
+    }
+    Object.keys(map).forEach(k => map[k].sort((a,b)=>a.date.localeCompare(b.date)));
+    return map;
+  }, [myEntries]);
+
+  // Leaderboard for today — Top 5 per gender, one record per person (best)
+  const todaysMovement = movementForDate(new Date());
+  const leaderboard = useMemo(() =>
+
