@@ -209,6 +209,7 @@ export default function App() {
 async function signInWithPasted() {
   const raw = (pasted || '').trim();
   if (!raw) return alert('Paste the email link or the code');
+  if (!email) return alert('Enter your email above first.');
 
   let code = null;
   let token = null;
@@ -222,13 +223,15 @@ async function signInWithPasted() {
     const u = new URL(raw);
     const sp = u.searchParams;
 
-    // 1) PKCE: /?code=...
+    // 1) PKCE code: /?code=...
     code = sp.get('code');
 
-    // 2) Classic magic link: /auth/v1/verify?type=magiclink&token=... or token_hash=...
+    // 2) Magic link variants:
+    //    /verify?type=magiclink&token=...   (your link)
+    //    /verify?type=magiclink&token_hash=...
     token = sp.get('token');
     token_hash = sp.get('token_hash');
-    type = sp.get('type'); // e.g., "magiclink", "recovery", etc.
+    type = sp.get('type');
 
     // 3) Hash tokens: #access_token=...&refresh_token=...
     if (u.hash && u.hash.length > 1) {
@@ -241,7 +244,7 @@ async function signInWithPasted() {
   }
 
   try {
-    // Case A: hash tokens (stay inside PWA)
+    // A) Direct hash tokens (PWA friendly)
     if (access_token && refresh_token) {
       const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
       if (error) throw error;
@@ -249,7 +252,7 @@ async function signInWithPasted() {
       return;
     }
 
-    // Case B: PKCE code
+    // B) PKCE code (/?code=...)
     if (code) {
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) throw error;
@@ -257,25 +260,37 @@ async function signInWithPasted() {
       return;
     }
 
-    // Case C: magiclink/recovery/email_change with token or token_hash
-    if ((token || token_hash) && type) {
-      const theToken = token || token_hash;
+    // C) Magic link with token or token_hash
+    if ((token || token_hash) && (type === 'magiclink' || type === 'recovery' || type === 'email_change')) {
+      // Try token first (email required)…
+      if (token) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          email,
+          token,
+          type // 'magiclink'
+        });
+        if (!error) {
+          setSession(data?.session || null);
+          return;
+        }
+        // If token didn’t work, fall through and try token_hash style.
+      }
+      // …then try token_hash variant (no email needed)
       const { data, error } = await supabase.auth.verifyOtp({
-        email,           // we already collected their email
-        token: theToken,
-        type             // e.g., 'magiclink', 'recovery', 'email_change'
+        token_hash: token_hash || token, // use whichever we have
+        type // 'magiclink'
       });
       if (error) throw error;
       setSession(data?.session || null);
       return;
     }
 
-    // Case D: raw 6-digit code (email OTP)
+    // D) Raw 6-digit code (email OTP)
     if (/^\d{6}$/.test(raw)) {
       const { data, error } = await supabase.auth.verifyOtp({
         email,
         token: raw,
-        type: 'email'   // 6-digit email verification code
+        type: 'email'
       });
       if (error) throw error;
       setSession(data?.session || null);
@@ -286,9 +301,8 @@ async function signInWithPasted() {
     return;
   }
 
-  alert('Could not find a token or code in what you pasted. Copy the full link address from the email and paste it here.');
+  alert('Could not find a token or code. Copy the full link from the email and paste it here.');
 }
-
     return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
