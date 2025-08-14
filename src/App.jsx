@@ -40,6 +40,9 @@ export default function App() {
 
   // Login form state (code flow removed)
   const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('');
+  const [pasted, setPasted] = useState(''); // NEW: paste magic link or code
+
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
@@ -204,6 +207,26 @@ export default function App() {
       if (error) alert(error.message);
       else alert('Magic link sent! Open it on the same device/browser.');
     }
+async function signInWithPasted() {
+  const raw = (pasted || '').trim();
+  if (!raw) return alert('Paste the email link or the code');
+
+  // Try to pull ?code=... from a full URL. If it's not a URL, treat it as the code.
+  let code = '';
+  try {
+    const u = new URL(raw);
+    code = u.searchParams.get('code') || '';
+  } catch {
+    code = raw;
+  }
+
+  if (!code) return alert('Could not find a code. Paste the full link or the code from the email.');
+
+  // Exchange code for a session (stays inside the PWA; no Safari jump)
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  if (error) return alert(error.message);
+  setSession(data?.session || null);
+}
 
     return (
       <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
@@ -243,6 +266,41 @@ export default function App() {
           >
             Send Magic Link
           </button>
+{/* PWA-friendly: paste the magic link or just the code */}
+<div style={{textAlign:'left', fontSize:12, marginTop:10, marginBottom:6, opacity:.9}}>
+  Or paste the email link (or just the code):
+</div>
+<input
+  type="text"
+  placeholder="Paste magic link or code here"
+  value={pasted}
+  onChange={(e)=>setPasted(e.target.value)}
+  style={{
+    width:'100%',
+    padding:'10px',
+    borderRadius:10,
+    border:'1px solid #444',
+    marginBottom:8,
+    background:'#111',
+    color:'#fff',
+    letterSpacing:1
+  }}
+/>
+<button
+  onClick={signInWithPasted}
+  style={{
+    width:'100%',
+    padding:'10px',
+    borderRadius:10,
+    border:'1px solid #333',
+    background:'#fff',
+    color:'#000',
+    fontWeight:700
+  }}
+>
+  Sign In with Pasted Link/Code
+</button>
+
         </div>
       </div>
     );
