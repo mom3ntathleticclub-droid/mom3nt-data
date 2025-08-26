@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { SITE_URL } from './config';
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
@@ -23,7 +23,7 @@ const MOVEMENTS = {
 };
 
 // ---------- New 8-week cycle starting Sept 1, 2025 (Monday) ----------
-const SEPT_CYCLE_START = new Date('2025-09-01'); // local date
+const SEPT_CYCLE_START = new Date('2025-09-01');
 const SEPT_CYCLE_WEEKS = 8;
 
 const SEPT_WEEK_TEMPLATE = {
@@ -44,7 +44,7 @@ const CYCLES = [
 function getCycleBounds(cycle) {
   const start = startOfDay(cycle.start);
   const end = new Date(start);
-  end.setDate(end.getDate() + cycle.weeks * 7 - 1); // inclusive
+  end.setDate(end.getDate() + cycle.weeks * 7 - 1);
   return { start, end };
 }
 function getCycleForDate(d) {
@@ -68,7 +68,6 @@ function isWithinISO(dateISO, start, end) {
   return d >= start && d <= end;
 }
 
-// Weekday order for rendering 7 movements consistently
 const WEEKDAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 function movementsFromTemplate(weekTemplate) {
   return WEEKDAY_ORDER.map(weekday => {
@@ -77,7 +76,7 @@ function movementsFromTemplate(weekTemplate) {
   }).filter(Boolean);
 }
 
-// Parse #hash params like access_token, refresh_token, etc.
+// Parse #hash params
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
   return window.location.hash
@@ -90,21 +89,77 @@ function parseHash() {
     }, {});
 }
 
+// ---------- Sticky numeric input (fixes iOS blur) ----------
+function NumberField({ value, onChange, placeholder, width = 160, allowDecimal = true }) {
+  const ref = useRef(null);
+  const [editing, setEditing] = useState(false);
+
+  // Keep focus across re-renders while editing
+  useEffect(() => {
+    if (!editing) return;
+    const el = ref.current;
+    if (!el) return;
+    if (document.activeElement !== el) {
+      el.focus({ preventScroll: true });
+      // place cursor at end
+      const len = el.value.length;
+      try { el.setSelectionRange(len, len); } catch {}
+    }
+  }, [value, editing]);
+
+  const sanitize = (raw) => {
+    if (allowDecimal) {
+      // keep digits and at most one dot
+      let next = raw.replace(/[^\d.]/g, '');
+      const firstDot = next.indexOf('.');
+      if (firstDot !== -1) {
+        // remove any extra dots
+        next = next.slice(0, firstDot + 1) + next.slice(firstDot + 1).replace(/\./g, '');
+      }
+      return next;
+    }
+    return raw.replace(/\D/g, '');
+  };
+
+  return (
+    <input
+      ref={ref}
+      type="tel"
+      inputMode={allowDecimal ? 'decimal' : 'numeric'}
+      autoCorrect="off"
+      autoCapitalize="none"
+      enterKeyHint="done"
+      placeholder={placeholder}
+      value={value}
+      onFocus={() => setEditing(true)}
+      onBlur={() => setTimeout(() => setEditing(false), 50)}
+      onChange={(e) => onChange(sanitize(e.target.value))}
+      style={{
+        padding: 10,
+        border: '1px solid #ddd',
+        borderRadius: 10,
+        width,
+        boxSizing: 'border-box',
+      }}
+    />
+  );
+}
+
 export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login form state
+  // Login state
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState(''); // 6-digit code
+  const [otp, setOtp] = useState('');
 
-  // Profile (sync with Supabase; also mirrored locally)
+  // Profile
   const [profileOpen, setProfileOpen] = useState(false);
   const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
 
   // UI
-  const [tab, setTab] = useState('calendar'); // calendar | database | leaderboard
+  const [tab, setTab] = useState('calendar');
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
@@ -118,7 +173,7 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link in URL + subscribe to auth changes ---
+  // --- Handle magic link + auth changes ---
   useEffect(() => {
     let sub;
     (async () => {
@@ -191,7 +246,7 @@ export default function App() {
     };
   }, []);
 
-  // Save name/gender to Supabase (Upsert)
+  // Save profile
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -206,17 +261,17 @@ export default function App() {
     setProfileOpen(false);
   }
 
-  // Movement picker honoring cycles
+  // Movement for date
   function movementForDate(d) {
     const cycle = getCycleForDate(d);
     if (cycle) {
       const mov = cycle.weekTemplate[dayName(d)];
       if (mov) return mov;
     }
-    // Fallback to legacy mapping
     return MOVEMENTS[dayName(d)];
   }
 
+  // Save entry (upsert on unique constraint)
   async function saveEntry() {
     if (!session) return alert('Please sign in first (use code).');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
@@ -234,7 +289,6 @@ export default function App() {
       gender,
     };
 
-    // Upsert ensures single entry per (user_id, date, movement)
     const { error } = await supabase
       .from('entries')
       .upsert(row, { onConflict: 'user_id,date,movement' });
@@ -264,13 +318,11 @@ export default function App() {
     return { currentCycle, previousCycle, currentBounds, previousBounds };
   }, []);
 
-  // Leaderboard for TODAY’S movement
+  // Leaderboard
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
     const rows = entries.filter(
-      (e) =>
-        e.movement === todaysMovement.name &&
-        (e.gender === 'male' || e.gender === 'female')
+      (e) => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female')
     );
     const bestMale = new Map();
     const bestFemale = new Map();
@@ -280,8 +332,7 @@ export default function App() {
       const prev = bucket.get(key);
       if (!prev || Number(r.value) > Number(prev.value)) bucket.set(key, r);
     }
-    const top5 = (m) =>
-      Array.from(m.values()).sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 5);
+    const top5 = (m) => Array.from(m.values()).sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 5);
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
@@ -328,13 +379,13 @@ export default function App() {
             Send Code
           </button>
           <input
-            type="text"
+            type="tel"
             inputMode="numeric"
             pattern="[0-9]*"
             maxLength={6}
             placeholder="Enter 6-digit code"
             value={otp}
-            onChange={(e)=>setOtp(e.target.value)}
+            onChange={(e)=>setOtp(e.target.value.replace(/\D/g,''))}
             style={{width:'100%',padding:'10px',borderRadius:10,border:'1px solid #444',marginBottom:8,background:'#111',color:'#fff',letterSpacing:2,textAlign:'center',fontWeight:700}}
           />
           <button
@@ -358,7 +409,6 @@ export default function App() {
     const days = new Date(y, m + 1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
-    // Tighten horizontal footprint for iPhone widths
     const gap = isMobile ? 2 : 6;
 
     return (
@@ -386,7 +436,6 @@ export default function App() {
                 key={d.toISOString()}
                 onClick={() => setSelectedDate(d)}
                 style={{
-                  // width-driven square cell
                   aspectRatio: '1 / 1',
                   width: '100%',
                   borderRadius: 10,
@@ -431,23 +480,12 @@ export default function App() {
               <div style={{fontSize:12,color:'#000'}}>Units: {movementForDate(selectedDate).unit}</div>
             </div>
             <div style={{display:'flex',gap:8}}>
-              <input
-                type="text"
-                inputMode="decimal"    // use "numeric" if you want integers only
-                pattern="[0-9]*"
-                autoCorrect="off"
-                autoCapitalize="none"
-                enterKeyHint="done"
-                placeholder={`Enter ${movementForDate(selectedDate).unit}`}
+              <NumberField
                 value={inputVal}
-                onChange={(e)=>setInputVal(e.target.value)}
-                style={{
-                  padding:10,
-                  border:'1px solid #ddd',
-                  borderRadius:10,
-                  width: isMobile ? 120 : 160,
-                  boxSizing:'border-box'
-                }}
+                onChange={setInputVal}
+                placeholder={`Enter ${movementForDate(selectedDate).unit}`}
+                width={isMobile ? 120 : 160}
+                allowDecimal={true}
               />
               <button onClick={saveEntry} style={{padding:'10px 12px',borderRadius:10,background:'#000',color:'#fff'}}>
                 Save
@@ -666,7 +704,7 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         </>
       )}
 
-      {/* All Cycles (All-time across all movements configured) */}
+      {/* All Cycles (All-time) */}
       {dbView === 'all' && (
         <>
           {(() => {
