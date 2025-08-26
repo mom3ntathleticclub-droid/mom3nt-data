@@ -515,7 +515,7 @@ export default function App() {
                   onClick={saveProfile}
                   style={{
                     padding:'8px 12px',
-                    border:'1px solid '#111',
+                    border:'1px solid #111',
                     borderRadius:10,
                     background:'#000',
                     color:'#fff',
