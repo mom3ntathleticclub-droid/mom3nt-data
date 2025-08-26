@@ -269,29 +269,6 @@ export default function App() {
     return { currentCycle, previousCycle, currentBounds, previousBounds };
   }, []);
 
-  // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
-  const todaysMovement = movementForDate(new Date());
-  const leaderboard = useMemo(() => {
-    const rows = entries.filter(
-      (e) =>
-        e.movement === todaysMovement.name &&
-        (e.gender === 'male' || e.gender === 'female')
-    );
-    const bestMale = new Map();
-    const bestFemale = new Map();
-    for (const r of rows) {
-      const key = (r.name || 'Member').trim() || 'Member';
-      const bucket = r.gender === 'male' ? bestMale : bestFemale;
-      const prev = bucket.get(key);
-      if (!prev || Number(r.value) > Number(prev.value)) bucket.set(key, r);
-    }
-    const top5 = (m) =>
-      Array.from(m.values())
-        .sort((a, b) => Number(b.value) - Number(a.value))
-        .slice(0, 5);
-    return { male: top5(bestMale), female: top5(bestFemale) };
-  }, [entries, todaysMovement.name]);
-
   // ---------- LOGIN UI: email + 6-digit code ----------
   if (!session) {
     // Send email that contains a 6-digit code (and a magic link you can ignore)
@@ -408,7 +385,7 @@ export default function App() {
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
     const start = first.getDay(); // 0 Sun
-    const days = new Date(y, m + 1, 0).getDate();
+    the const days = new Date(y, m + 1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
     return (
@@ -720,28 +697,44 @@ export default function App() {
               </>
             )}
 
-            {/* ========== ALL CYCLES (All Time) ========== */}
+            {/* ========== ALL CYCLES (All Time; ALWAYS show 14 movements) ========== */}
             {dbView === 'all' && (
               <>
                 {(() => {
-                  // Build all-time series across all movements
-                  const map = new Map(); // movementName -> { unit, rows }
-                  for (const e of myEntries) {
-                    if (!map.has(e.movement)) map.set(e.movement, { unit: e.unit, rows: [] });
-                    map.get(e.movement).rows.push({ date: e.date, value: Number(e.value) });
-                  }
-                  for (const v of map.values()) v.rows.sort((a, b) => a.date.localeCompare(b.date));
+                  // Build the canonical list of movement names & units from:
+                  // - legacy MOVEMENTS (7)
+                  // - every cycle's weekTemplate (7 per cycle)
+                  const movementMap = new Map(); // name -> unit
+                  // Legacy
+                  Object.values(MOVEMENTS).forEach(m => {
+                    if (m?.name) movementMap.set(m.name, m.unit || '');
+                  });
+                  // Cycles
+                  CYCLES.forEach(cy => {
+                    Object.values(cy.weekTemplate).forEach(m => {
+                      if (m?.name && !movementMap.has(m.name)) {
+                        movementMap.set(m.name, m.unit || '');
+                      }
+                    });
+                  });
 
-                  const entriesArr = Array.from(map.entries());
-                  if (!entriesArr.length) {
+                  const movementList = Array.from(movementMap.entries()).map(([name, unit]) => ({ name, unit }));
+
+                  if (!movementList.length) {
                     return (
                       <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                        <div style={{ fontSize: 14 }}>No data yet.</div>
+                        <div style={{ fontSize: 14 }}>No movements configured.</div>
                       </div>
                     );
                   }
 
-                  return entriesArr.map(([movementName, { unit, rows }]) => {
+                  return movementList.map(({ name: movementName, unit }) => {
+                    // Pull ALL entries ever recorded for this movement
+                    const rows = myEntries
+                      .filter(e => e.movement === movementName)
+                      .map(e => ({ date: e.date, value: Number(e.value) }))
+                      .sort((a, b) => a.date.localeCompare(b.date));
+
                     const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
                     return (
                       <div key={`all-${movementName}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
