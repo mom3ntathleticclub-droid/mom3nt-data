@@ -11,8 +11,8 @@ const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: '
 const range = (n) => Array.from({ length: n }, (_, i) => i);
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-// ---------- Legacy static mapping (fallback outside cycles) ----------
-const MOVEMENTS = {
+// ---------- Legacy static mapping (used for PREVIOUS cycle) ----------
+const LEGACY_MOVEMENTS = {
   Sunday:    { key: 'sun', name: '3 Rep Max Landmine clean', unit: 'lbs' },
   Monday:    { key: 'mon', name: '6 Rep Reverse Lunge Max', unit: 'lbs' },
   Tuesday:   { key: 'tue', name: 'Max power Keiser Push/Pull', unit: 'watts' },
@@ -36,17 +36,37 @@ const SEPT_WEEK_TEMPLATE = {
   Sunday:    { key: 'w_sun', name: 'Keiser Rotate to Press',       unit: 'watts' },
 };
 
+// ---------- Previous 8-week cycle (explicit dates you asked for) ----------
+const PREV_CYCLE_START = new Date('2025-07-06'); // Sunday
+const PREV_CYCLE_END   = new Date('2025-08-31'); // Sunday (explicit end)
+const PREV_WEEK_TEMPLATE = {
+  ...LEGACY_MOVEMENTS, // same mapping as legacy/original set
+};
+
+// ---------- Cycles definition ----------
+/*
+  Each cycle can have either:
+    - { start, weeks, weekTemplate }  -> end is computed as start + weeks*7 - 1
+  OR
+    - { start, endOverride, weekTemplate } -> explicit end date
+*/
 const CYCLES = [
-  { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS, weekTemplate: SEPT_WEEK_TEMPLATE },
+  { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE }, // Previous
+  { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS, weekTemplate: SEPT_WEEK_TEMPLATE },     // Current
 ];
 
 // ---------- Cycle utilities ----------
 function getCycleBounds(cycle) {
   const start = startOfDay(cycle.start);
+  if (cycle.endOverride) {
+    const end = startOfDay(cycle.endOverride);
+    return { start, end };
+  }
   const end = new Date(start);
-  end.setDate(end.getDate() + cycle.weeks * 7 - 1);
+  end.setDate(end.getDate() + (cycle.weeks ?? 0) * 7 - 1); // inclusive
   return { start, end };
 }
+
 function getCycleForDate(d) {
   const day = startOfDay(d);
   for (const c of CYCLES) {
@@ -55,6 +75,7 @@ function getCycleForDate(d) {
   }
   return null;
 }
+
 function getCurrentCycleIndex(date = new Date()) {
   const day = startOfDay(date);
   for (let i = 0; i < CYCLES.length; i++) {
@@ -63,11 +84,13 @@ function getCurrentCycleIndex(date = new Date()) {
   }
   return -1;
 }
+
 function isWithinISO(dateISO, start, end) {
   const d = new Date(dateISO + 'T00:00:00');
   return d >= start && d <= end;
 }
 
+// Weekday order for rendering 7 movements consistently
 const WEEKDAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 function movementsFromTemplate(weekTemplate) {
   return WEEKDAY_ORDER.map(weekday => {
@@ -76,7 +99,7 @@ function movementsFromTemplate(weekTemplate) {
   }).filter(Boolean);
 }
 
-// Parse #hash params
+// Parse #hash params like access_token, refresh_token, etc.
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
   return window.location.hash
@@ -101,7 +124,6 @@ function NumberField({ value, onChange, placeholder, width = 160, allowDecimal =
     if (!el) return;
     if (document.activeElement !== el) {
       el.focus({ preventScroll: true });
-      // place cursor at end
       const len = el.value.length;
       try { el.setSelectionRange(len, len); } catch {}
     }
@@ -109,11 +131,10 @@ function NumberField({ value, onChange, placeholder, width = 160, allowDecimal =
 
   const sanitize = (raw) => {
     if (allowDecimal) {
-      // keep digits and at most one dot
+      // digits + one dot
       let next = raw.replace(/[^\d.]/g, '');
       const firstDot = next.indexOf('.');
       if (firstDot !== -1) {
-        // remove any extra dots
         next = next.slice(0, firstDot + 1) + next.slice(firstDot + 1).replace(/\./g, '');
       }
       return next;
@@ -149,17 +170,17 @@ export default function App() {
   // Auth/session
   const [session, setSession] = useState(null);
 
-  // Login state
+  // Login form state
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState(''); // 6-digit code
 
-  // Profile
+  // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
   const [name, setName] = useState(localStorage.getItem('mom3nt_name') || '');
   const [gender, setGender] = useState(localStorage.getItem('mom3nt_gender') || '');
 
   // UI
-  const [tab, setTab] = useState('calendar');
+  const [tab, setTab] = useState('calendar'); // calendar | database | leaderboard
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
@@ -173,7 +194,7 @@ export default function App() {
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link + auth changes ---
+  // --- Handle magic link in URL + subscribe to auth changes ---
   useEffect(() => {
     let sub;
     (async () => {
@@ -246,7 +267,7 @@ export default function App() {
     };
   }, []);
 
-  // Save profile
+  // Save name/gender to Supabase (Upsert)
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -261,24 +282,29 @@ export default function App() {
     setProfileOpen(false);
   }
 
-  // Movement for date
+  // Movement picker honoring cycles; outside cycles -> "TBD"
   function movementForDate(d) {
     const cycle = getCycleForDate(d);
     if (cycle) {
       const mov = cycle.weekTemplate[dayName(d)];
       if (mov) return mov;
     }
-    return MOVEMENTS[dayName(d)];
+    return { key: 'tbd', name: 'TBD', unit: '' };
   }
 
-  // Save entry (upsert on unique constraint)
   async function saveEntry() {
     if (!session) return alert('Please sign in first (use code).');
     if (!name.trim() || !gender) { setProfileOpen(true); return; }
+
+    const mov = movementForDate(selectedDate);
+    if (mov.name === 'TBD') {
+      alert('This date is not in an active cycle yet. Entry is disabled.');
+      return;
+    }
+
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
 
-    const mov = movementForDate(selectedDate);
     const row = {
       user_id: session.user.id,
       date: iso(selectedDate),
@@ -289,6 +315,7 @@ export default function App() {
       gender,
     };
 
+    // Upsert ensures single entry per (user_id, date, movement)
     const { error } = await supabase
       .from('entries')
       .upsert(row, { onConflict: 'user_id,date,movement' });
@@ -309,20 +336,26 @@ export default function App() {
     const idx = getCurrentCycleIndex(new Date());
     let currentCycle = idx >= 0 ? CYCLES[idx] : null;
     let previousCycle = idx > 0 ? CYCLES[idx - 1] : null;
+
+    // If today is not in any cycle, keep both defined so tabs still show data
     if (!currentCycle && CYCLES.length) {
       currentCycle = CYCLES[CYCLES.length - 1];
       previousCycle = CYCLES.length > 1 ? CYCLES[CYCLES.length - 2] : null;
     }
+
     const currentBounds = currentCycle ? getCycleBounds(currentCycle) : null;
     const previousBounds = previousCycle ? getCycleBounds(previousCycle) : null;
     return { currentCycle, previousCycle, currentBounds, previousBounds };
   }, []);
 
-  // Leaderboard
+  // Leaderboard for TODAY’S movement — hide if TBD
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
+    if (todaysMovement.name === 'TBD') return { male: [], female: [] };
     const rows = entries.filter(
-      (e) => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female')
+      (e) =>
+        e.movement === todaysMovement.name &&
+        (e.gender === 'male' || e.gender === 'female')
     );
     const bestMale = new Map();
     const bestFemale = new Map();
@@ -332,11 +365,12 @@ export default function App() {
       const prev = bucket.get(key);
       if (!prev || Number(r.value) > Number(prev.value)) bucket.set(key, r);
     }
-    const top5 = (m) => Array.from(m.values()).sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 5);
+    const top5 = (m) =>
+      Array.from(m.values()).sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 5);
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
-  // ---------- LOGIN UI ----------
+  // ---------- LOGIN UI: email + 6-digit code ----------
   if (!session) {
     async function sendCode() {
       if (!email) return alert('Enter your email');
@@ -365,6 +399,8 @@ export default function App() {
         <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
           <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
           <p style={{marginBottom:12, opacity:.9}}>Sign in with the 6-digit code sent to your email.</p>
+
+          {/* Email */}
           <input
             type="email"
             placeholder="you@example.com"
@@ -372,12 +408,16 @@ export default function App() {
             onChange={(e)=>setEmail(e.target.value)}
             style={{width:'100%',padding:'10px',borderRadius:10,border:'1px solid #444',marginBottom:8,background:'#111',color:'#fff'}}
           />
+
+          {/* Send code */}
           <button
             onClick={sendCode}
             style={{width:'100%',padding:'10px',borderRadius:10,border:'1px solid #111',background:'#dca636',color:'#000',fontWeight:700,marginBottom:12}}
           >
             Send Code
           </button>
+
+          {/* Enter 6-digit code */}
           <input
             type="tel"
             inputMode="numeric"
@@ -410,6 +450,9 @@ export default function App() {
     const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
     const gap = isMobile ? 2 : 6;
+
+    const mov = movementForDate(selectedDate);
+    const isTBD = mov.name === 'TBD';
 
     return (
       <>
@@ -475,19 +518,35 @@ export default function App() {
             <div style={{minWidth: 0}}>
               <div style={{fontSize:12,color:'#000'}}>Selected: {iso(selectedDate)}</div>
               <div style={{fontWeight:700,color:'#000', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                {movementForDate(selectedDate).name}
+                {mov.name}
               </div>
-              <div style={{fontSize:12,color:'#000'}}>Units: {movementForDate(selectedDate).unit}</div>
+              <div style={{fontSize:12,color:'#000'}}>Units: {mov.unit || '—'}</div>
+              {isTBD && (
+                <div style={{fontSize:12,color:'#b45309', marginTop:4}}>
+                  TBD day — entries disabled outside the defined cycles.
+                </div>
+              )}
             </div>
             <div style={{display:'flex',gap:8}}>
               <NumberField
                 value={inputVal}
                 onChange={setInputVal}
-                placeholder={`Enter ${movementForDate(selectedDate).unit}`}
+                placeholder={isTBD ? 'Unavailable' : `Enter ${mov.unit}`}
                 width={isMobile ? 120 : 160}
                 allowDecimal={true}
               />
-              <button onClick={saveEntry} style={{padding:'10px 12px',borderRadius:10,background:'#000',color:'#fff'}}>
+              <button
+                onClick={saveEntry}
+                disabled={isTBD}
+                style={{
+                  padding:'10px 12px',
+                  borderRadius:10,
+                  background: isTBD ? '#aaa' : '#000',
+                  color:'#fff',
+                  opacity: isTBD ? 0.7 : 1,
+                  cursor: isTBD ? 'not-allowed' : 'pointer'
+                }}
+              >
                 Save
               </button>
             </div>
@@ -553,26 +612,32 @@ export default function App() {
         {tab === 'leaderboard' && (
           <section>
             <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
-              <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>
-                {todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span>
-              </div>
-
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                {['male','female'].map((g) => (
-                  <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
-                    <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
-                    <ol style={{marginTop:6,display:'grid',gap:6}}>
-                      {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
-                        <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
-                          <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
-                          <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
-                        </li>
-                      )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
-                    </ol>
+              {todaysMovement.name === 'TBD' ? (
+                <div style={{fontSize:14}}>No leaderboard today (TBD).</div>
+              ) : (
+                <>
+                  <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
+                  <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>
+                    {todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span>
                   </div>
-                ))}
-              </div>
+
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    {['male','female'].map((g) => (
+                      <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
+                        <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
+                        <ol style={{marginTop:6,display:'grid',gap:6}}>
+                          {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
+                            <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
+                              <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
+                              <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
+                            </li>
+                          )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
+                        </ol>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </section>
         )}
@@ -704,15 +769,17 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         </>
       )}
 
-      {/* All Cycles (All-time) */}
+      {/* All Cycles (All-time across all movements, excluding TBD) */}
       {dbView === 'all' && (
         <>
           {(() => {
             const movementMap = new Map();
-            Object.values(MOVEMENTS).forEach((m)=> m?.name && movementMap.set(m.name, m.unit || ''));
+            // previous (legacy) movements
+            Object.values(LEGACY_MOVEMENTS).forEach((m)=> m?.name && movementMap.set(m.name, m.unit || ''));
+            // current cycle movements
             CYCLES.forEach((cy)=> {
               Object.values(cy.weekTemplate).forEach((m)=> {
-                if (m?.name && !movementMap.has(m.name)) movementMap.set(m.name, m.unit || '');
+                if (m?.name && m.name !== 'TBD' && !movementMap.has(m.name)) movementMap.set(m.name, m.unit || '');
               });
             });
             const movementList = Array.from(movementMap.entries()).map(([name, unit]) => ({ name, unit }));
@@ -743,7 +810,7 @@ function ChartCard({ title, unit, rows, data }) {
     <div style={{ marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700, color:'#000' }}>{title}</div>
-        <div style={{ fontSize:12, color:'#000' }}>{rows.length} entries • {unit}</div>
+        <div style={{ fontSize:12, color:'#000' }}>{rows.length} entries • {unit || '—'}</div>
       </div>
       <div style={{ width:'100%', height:220 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -759,7 +826,7 @@ function ChartCard({ title, unit, rows, data }) {
                 const p = payload && payload[0] && payload[0].payload;
                 return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
               }}
-              formatter={(val) => [`${val} ${unit}`, 'Value']}
+              formatter={(val) => [`${val} ${unit || ''}`, 'Value']}
             />
             <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r:4 }} />
           </LineChart>
@@ -768,4 +835,3 @@ function ChartCard({ title, unit, rows, data }) {
     </div>
   );
 }
-
