@@ -11,6 +11,26 @@ const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: '
 const range = (n) => Array.from({ length: n }, (_, i) => i);
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
+// Monday-start week helpers
+function startOfWeekMonday(d) {
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const w = day.getDay(); // 0=Sun..6=Sat
+  const delta = (w + 6) % 7; // days since Monday
+  day.setDate(day.getDate() - delta);
+  return day;
+}
+function endOfWeekMonday(d) {
+  const s = startOfWeekMonday(d);
+  const e = new Date(s);
+  e.setDate(e.getDate() + 6); // Mon..Sun
+  return e;
+}
+function addDays(d, days) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + days);
+  return x;
+}
+
 // ---------- Legacy static mapping (fallback outside cycles) ----------
 const MOVEMENTS = {
   Sunday:    { key: 'sun', name: '3 Rep Max Landmine clean', unit: 'lbs' },
@@ -109,7 +129,8 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
 
-  // Database view: this cycle | previous cycle | all time
+  // Database view: this week | previous week | all time
+  // (labels kept as 'this', 'prev', 'all' but semantics are week-based)
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
 
   // Data
@@ -241,48 +262,44 @@ export default function App() {
     return entries.filter((e) => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // ----- Database tab: filter set (This / Previous / All Time) -----
+  // ---------- Database tab logic ----------
+  // Decide which week we're showing (Mon..Sun)
+  const selectedWeekBounds = useMemo(() => {
+    if (dbView === 'all') return null; // all-time mode
+    const today = new Date();
+    const base = dbView === 'this' ? today : addDays(today, -7);
+    const start = startOfWeekMonday(base);
+    const end = endOfWeekMonday(base);
+    return { start, end };
+  }, [dbView]);
+
+  // Build the 7 movements for the selected week (even if no data yet)
+  const selectedWeekMovements = useMemo(() => {
+    if (!selectedWeekBounds) return [];
+    const { start } = selectedWeekBounds;
+    // Build the exact 7 dates of the week (Mon..Sun)
+    const days = range(7).map((i) => addDays(start, i));
+    // Map each day to the movement for that calendar day (cycle-aware)
+    return days.map((d) => {
+      const dn = dayName(d);
+      const mov = movementForDate(d);
+      return { weekday: dn, date: iso(d), ...mov };
+    });
+  }, [selectedWeekBounds]);
+
+  // Entries filtered to the selected week (for this/prev views) or all (for all-time)
   const filteredMyEntries = useMemo(() => {
     if (!session) return [];
-    const mine = entries.filter((e) => e.user_id === session.user.id);
+    const mine = myEntries;
+    if (!selectedWeekBounds) return mine; // all-time
+    const { start, end } = selectedWeekBounds;
+    return mine.filter((e) => isWithinISO(e.date, start, end));
+  }, [myEntries, selectedWeekBounds, session]);
 
-    if (dbView === 'all' || !CYCLES.length) return mine;
-
-    const nowIdx = getCurrentCycleIndex(new Date());
-    const currentCycle = nowIdx >= 0 ? CYCLES[nowIdx] : null;
-
-    if (dbView === 'this') {
-      if (currentCycle) {
-        const { start, end } = getCycleBounds(currentCycle);
-        return mine.filter((e) => isWithinISO(e.date, start, end));
-      }
-      // if not in any cycle right now, fall back to all
-      return mine;
-    }
-
-    if (dbView === 'prev') {
-      if (currentCycle) {
-        const { start } = getCycleBounds(currentCycle);
-        // No previous configured cycle? Show all entries strictly before this cycle.
-        const prevConfigured = nowIdx > 0 ? CYCLES[nowIdx - 1] : null;
-        if (prevConfigured) {
-          const { start: pStart, end: pEnd } = getCycleBounds(prevConfigured);
-          return mine.filter((e) => isWithinISO(e.date, pStart, pEnd));
-        } else {
-          return mine.filter((e) => new Date(e.date + 'T00:00:00') < start);
-        }
-      }
-      // if not in any cycle, fall back to all
-      return mine;
-    }
-
-    return mine;
-  }, [entries, session, dbView]);
-
-  // Build dynamic series from whatever movements exist in filtered data
-  const dynamicSeries = useMemo(() => {
+  // For all-time: dynamic list of all movements with full history
+  const allTimeSeries = useMemo(() => {
     const map = new Map(); // movementName -> { unit, rows: [{date, value}] }
-    for (const e of filteredMyEntries) {
+    for (const e of myEntries) {
       if (!map.has(e.movement)) {
         map.set(e.movement, { unit: e.unit, rows: [] });
       }
@@ -293,7 +310,7 @@ export default function App() {
       v.rows.sort((a, b) => a.date.localeCompare(b.date));
     }
     return map;
-  }, [filteredMyEntries]);
+  }, [myEntries]);
 
   // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
@@ -620,71 +637,111 @@ export default function App() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <label style={{ fontSize: 12 }}>View:</label>
               <select value={dbView} onChange={(e) => setDbView(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 8 }}>
-                <option value="this">This Cycle</option>
-                <option value="prev">Previous Cycle</option>
+                <option value="this">This Week</option>
+                <option value="prev">Previous Week</option>
                 <option value="all">All Time</option>
               </select>
-              {/* Optional: show date bounds when in cycle views */}
-              {dbView !== 'all' && CYCLES.length > 0 && (() => {
-                const idx = getCurrentCycleIndex(new Date());
-                if (idx >= 0) {
-                  const currentBounds = getCycleBounds(CYCLES[idx]);
-                  const prevBounds = idx > 0 ? getCycleBounds(CYCLES[idx - 1]) : null;
-                  const txt =
-                    dbView === 'this'
-                      ? `${iso(currentBounds.start)} → ${iso(currentBounds.end)}`
-                      : prevBounds
-                      ? `${iso(prevBounds.start)} → ${iso(prevBounds.end)}`
-                      : `Before ${iso(currentBounds.start)}`;
-                  return <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>{txt}</span>;
-                }
-                return null;
-              })()}
+              {/* Date badge */}
+              {dbView !== 'all' && selectedWeekBounds && (
+                <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
+                  {iso(selectedWeekBounds.start)} → {iso(selectedWeekBounds.end)}
+                </span>
+              )}
             </div>
 
-            {/* Charts for whatever movements exist in the filtered range */}
-            {Array.from(dynamicSeries.entries()).length === 0 && (
-              <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                <div style={{ fontSize: 14 }}>No data yet for this view.</div>
-              </div>
+            {/* WEEK VIEWS: always show all 7 movements */}
+            {dbView !== 'all' && (
+              <>
+                {selectedWeekMovements.map(({ weekday, name: movementName, unit }) => {
+                  const rows = filteredMyEntries
+                    .filter((e) => e.movement === movementName)
+                    .map((e) => ({ date: e.date, value: Number(e.value) }))
+                    .sort((a, b) => a.date.localeCompare(b.date));
+
+                  const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
+
+                  return (
+                    <div
+                      key={weekday}
+                      style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <div style={{ fontWeight: 700, color: '#000' }}>
+                          {weekday}: {movementName}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+                      </div>
+                      <div style={{ width: '100%', height: 220 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+                            <CartesianGrid stroke="#e5e7eb" />
+                            <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+                            <YAxis tick={{ fill: '#000' }} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+                              labelStyle={{ color: '#000' }}
+                              itemStyle={{ color: '#000' }}
+                              labelFormatter={(label, payload) => {
+                                const p = payload && payload[0] && payload[0].payload;
+                                return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+                              }}
+                              formatter={(val) => [`${val} ${unit}`, 'Value']}
+                            />
+                            <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
             )}
 
-            {Array.from(dynamicSeries.entries()).map(([movementName, { unit, rows }]) => {
-              const last20 = rows.slice(-20);
-              const data = last20.map((r) => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
+            {/* ALL-TIME VIEW: dynamic list of every movement ever tracked */}
+            {dbView === 'all' && (
+              <>
+                {Array.from(allTimeSeries.entries()).length === 0 && (
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                    <div style={{ fontSize: 14 }}>No data yet.</div>
+                  </div>
+                )}
 
-              return (
-                <div
-                  key={movementName}
-                  style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <div style={{ fontWeight: 700, color: '#000' }}>{movementName}</div>
-                    <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
-                  </div>
-                  <div style={{ width: '100%', height: 220 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                        <CartesianGrid stroke="#e5e7eb" />
-                        <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                        <YAxis tick={{ fill: '#000' }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                          labelStyle={{ color: '#000' }}
-                          itemStyle={{ color: '#000' }}
-                          labelFormatter={(label, payload) => {
-                            const p = payload && payload[0] && payload[0].payload;
-                            return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                          }}
-                          formatter={(val) => [`${val} ${unit}`, 'Value']}
-                        />
-                        <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              );
-            })}
+                {Array.from(allTimeSeries.entries()).map(([movementName, { unit, rows }]) => {
+                  const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
+                  return (
+                    <div
+                      key={movementName}
+                      style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <div style={{ fontWeight: 700, color: '#000' }}>{movementName}</div>
+                        <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+                      </div>
+                      <div style={{ width: '100%', height: 220 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+                            <CartesianGrid stroke="#e5e7eb" />
+                            <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+                            <YAxis tick={{ fill: '#000' }} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+                              labelStyle={{ color: '#000' }}
+                              itemStyle={{ color: '#000' }}
+                              labelFormatter={(label, payload) => {
+                                const p = payload && payload[0] && payload[0].payload;
+                                return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+                              }}
+                              formatter={(val) => [`${val} ${unit}`, 'Value']}
+                            />
+                            <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
           </section>
         )}
 
