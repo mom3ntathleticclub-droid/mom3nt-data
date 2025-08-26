@@ -4,7 +4,14 @@ import { supabase } from './lib/supabase';
 import { SITE_URL } from './config';
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 
-// Movements by weekday (units set)
+// ---------- Helpers ----------
+const iso = (d) => d.toISOString().slice(0, 10);
+const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
+const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+const range = (n) => Array.from({ length: n }, (_, i) => i);
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// ---------- Legacy static mapping (fallback outside cycles) ----------
 const MOVEMENTS = {
   Sunday:    { key: 'sun', name: '3 Rep Max Landmine clean', unit: 'lbs' },
   Monday:    { key: 'mon', name: '6 Rep Reverse Lunge Max', unit: 'lbs' },
@@ -15,11 +22,60 @@ const MOVEMENTS = {
   Saturday:  { key: 'sat', name: 'Max distance 30 sec assault bike', unit: 'miles' },
 };
 
-// Helpers
-const iso = (d) => d.toISOString().slice(0,10);
-const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
-const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-const range = (n) => Array.from({length: n}, (_,i) => i);
+// ---------- New 8-week cycle starting Sept 1, 2025 (Monday) ----------
+const SEPT_CYCLE_START = new Date('2025-09-01'); // local date
+const SEPT_CYCLE_WEEKS = 8;
+
+// Weekly template (repeats each of the 8 weeks)
+const SEPT_WEEK_TEMPLATE = {
+  Monday:    { key: 'w_mon', name: '6 Rep Bulgarian Split Squat', unit: 'lbs' },
+  Tuesday:   { key: 'w_tue', name: '6 Rep DB Floor Press',        unit: 'lbs' },
+  Wednesday: { key: 'w_wed', name: '.1 Distance Run',              unit: 'time' },
+  Thursday:  { key: 'w_thu', name: '6 Rep Smith RDL',              unit: 'lbs' },
+  Friday:    { key: 'w_fri', name: 'Pull Up + Push Press EDT',     unit: 'rounds' },
+  Saturday:  { key: 'w_sat', name: 'Ski/Curl/Squat METCON',        unit: 'time' },
+  Sunday:    { key: 'w_sun', name: 'Keiser Rotate to Press',       unit: 'watts' },
+};
+
+// You can add future cycles by appending here.
+const CYCLES = [
+  {
+    start: SEPT_CYCLE_START,
+    weeks: SEPT_CYCLE_WEEKS,
+    weekTemplate: SEPT_WEEK_TEMPLATE,
+  },
+];
+
+// ---------- Cycle utilities ----------
+function getCycleBounds(cycle) {
+  const start = startOfDay(cycle.start);
+  const end = new Date(start);
+  end.setDate(end.getDate() + cycle.weeks * 7 - 1); // inclusive
+  return { start, end };
+}
+
+function getCycleForDate(d) {
+  const day = startOfDay(d);
+  for (const c of CYCLES) {
+    const { start, end } = getCycleBounds(c);
+    if (day >= start && day <= end) return c;
+  }
+  return null;
+}
+
+function getCurrentCycleIndex(date = new Date()) {
+  const day = startOfDay(date);
+  for (let i = 0; i < CYCLES.length; i++) {
+    const { start, end } = getCycleBounds(CYCLES[i]);
+    if (day >= start && day <= end) return i;
+  }
+  return -1;
+}
+
+function isWithinISO(dateISO, start, end) {
+  const d = new Date(dateISO + 'T00:00:00');
+  return d >= start && d <= end;
+}
 
 // Parse #hash params like access_token, refresh_token, etc.
 function parseHash() {
@@ -27,7 +83,7 @@ function parseHash() {
   return window.location.hash
     .substring(1)
     .split('&')
-    .map(pair => pair.split('='))
+    .map((pair) => pair.split('='))
     .reduce((acc, [k, v]) => {
       acc[decodeURIComponent(k)] = decodeURIComponent(v || '');
       return acc;
@@ -40,7 +96,7 @@ export default function App() {
 
   // Login form state
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState(''); // NEW: 6-digit code
+  const [otp, setOtp] = useState(''); // 6-digit code
 
   // Profile (sync with Supabase; also mirrored locally)
   const [profileOpen, setProfileOpen] = useState(false);
@@ -53,10 +109,13 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
 
+  // Database view: this cycle | previous cycle | all time
+  const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
+
   // Data
   const [entries, setEntries] = useState([]);
 
-  // --- Handle magic link in URL (if user DID click the link) + subscribe to auth changes ---
+  // --- Handle magic link in URL + subscribe to auth changes ---
   useEffect(() => {
     let sub;
     (async () => {
@@ -84,7 +143,9 @@ export default function App() {
       const res = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
       sub = res.data?.subscription;
     })();
-    return () => { if (sub) sub.unsubscribe(); };
+    return () => {
+      if (sub) sub.unsubscribe();
+    };
   }, []);
 
   // Load entries + profile once logged in
@@ -126,26 +187,34 @@ export default function App() {
     const { error } = await supabase.from('profiles').upsert({
       id: session.user.id,
       name: trimmed || null,
-      gender: g
+      gender: g,
     });
     if (error) return alert(error.message);
     alert('Profile saved!');
     setProfileOpen(false);
   }
 
+  // Movement picker honoring cycles
   function movementForDate(d) {
+    const cycle = getCycleForDate(d);
+    if (cycle) {
+      const mov = cycle.weekTemplate[dayName(d)];
+      if (mov) return mov;
+    }
+    // Fallback to legacy mapping
     return MOVEMENTS[dayName(d)];
   }
 
   async function saveEntry() {
     if (!session) return alert('Please sign in first (use code).');
-    if (!name.trim() || !gender) { setProfileOpen(true); return; }
+    if (!name.trim() || !gender) {
+      setProfileOpen(true);
+      return;
+    }
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
 
     const mov = movementForDate(selectedDate);
-
-    // Build row (client ensures one record per (user_id, date, movement); server enforces via unique index)
     const row = {
       user_id: session.user.id,
       date: iso(selectedDate),
@@ -153,49 +222,86 @@ export default function App() {
       value: v,
       unit: mov.unit,
       name: name.trim(),
-      gender
+      gender,
     };
 
-    // ********** CHANGED: insert -> upsert with onConflict **********
-    // This will REPLACE the existing row if a record already exists for the same (user_id, date, movement)
+    // Upsert ensures single entry per (user_id, date, movement)
     const { error } = await supabase
       .from('entries')
-      .upsert(row, { onConflict: 'user_id,date' });
-
-
+      .upsert(row, { onConflict: 'user_id,date,movement' });
     if (error) return alert(error.message);
     setInputVal('');
 
-    // Refresh entries after write
-    const { data } = await supabase
-      .from('entries')
-      .select('*')
-      .order('date', { ascending: true });
-
+    const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
     setEntries(data || []);
   }
 
   const myEntries = useMemo(() => {
     if (!session) return [];
-    return entries.filter(e => e.user_id === session.user.id);
+    return entries.filter((e) => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // Build series per movement (my data only) for charts
-  const seriesByMovement = useMemo(() => {
-    const map = {};
-    Object.values(MOVEMENTS).forEach(m => { map[m.name] = []; });
-    for (const e of myEntries) {
-      map[e.movement]?.push({ date: e.date, value: Number(e.value) });
+  // ----- Database tab: filter set (This / Previous / All Time) -----
+  const filteredMyEntries = useMemo(() => {
+    if (!session) return [];
+    const mine = entries.filter((e) => e.user_id === session.user.id);
+
+    if (dbView === 'all' || !CYCLES.length) return mine;
+
+    const nowIdx = getCurrentCycleIndex(new Date());
+    const currentCycle = nowIdx >= 0 ? CYCLES[nowIdx] : null;
+
+    if (dbView === 'this') {
+      if (currentCycle) {
+        const { start, end } = getCycleBounds(currentCycle);
+        return mine.filter((e) => isWithinISO(e.date, start, end));
+      }
+      // if not in any cycle right now, fall back to all
+      return mine;
     }
-    Object.keys(map).forEach(k => map[k].sort((a,b)=>a.date.localeCompare(b.date)));
+
+    if (dbView === 'prev') {
+      if (currentCycle) {
+        const { start } = getCycleBounds(currentCycle);
+        // No previous configured cycle? Show all entries strictly before this cycle.
+        const prevConfigured = nowIdx > 0 ? CYCLES[nowIdx - 1] : null;
+        if (prevConfigured) {
+          const { start: pStart, end: pEnd } = getCycleBounds(prevConfigured);
+          return mine.filter((e) => isWithinISO(e.date, pStart, pEnd));
+        } else {
+          return mine.filter((e) => new Date(e.date + 'T00:00:00') < start);
+        }
+      }
+      // if not in any cycle, fall back to all
+      return mine;
+    }
+
+    return mine;
+  }, [entries, session, dbView]);
+
+  // Build dynamic series from whatever movements exist in filtered data
+  const dynamicSeries = useMemo(() => {
+    const map = new Map(); // movementName -> { unit, rows: [{date, value}] }
+    for (const e of filteredMyEntries) {
+      if (!map.has(e.movement)) {
+        map.set(e.movement, { unit: e.unit, rows: [] });
+      }
+      const obj = map.get(e.movement);
+      obj.rows.push({ date: e.date, value: Number(e.value) });
+    }
+    for (const v of map.values()) {
+      v.rows.sort((a, b) => a.date.localeCompare(b.date));
+    }
     return map;
-  }, [myEntries]);
+  }, [filteredMyEntries]);
 
   // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
     const rows = entries.filter(
-      e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female')
+      (e) =>
+        e.movement === todaysMovement.name &&
+        (e.gender === 'male' || e.gender === 'female')
     );
     const bestMale = new Map();
     const bestFemale = new Map();
@@ -205,7 +311,10 @@ export default function App() {
       const prev = bucket.get(key);
       if (!prev || Number(r.value) > Number(prev.value)) bucket.set(key, r);
     }
-    const top5 = (m) => Array.from(m.values()).sort((a,b)=>Number(b.value)-Number(a.value)).slice(0,5);
+    const top5 = (m) =>
+      Array.from(m.values())
+        .sort((a, b) => Number(b.value) - Number(a.value))
+        .slice(0, 5);
     return { male: top5(bestMale), female: top5(bestFemale) };
   }, [entries, todaysMovement.name]);
 
@@ -216,7 +325,7 @@ export default function App() {
       if (!email) return alert('Enter your email');
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: SITE_URL } // fine to leave; we’re using the code in-app
+        options: { emailRedirectTo: SITE_URL }, // we’re using the code in-app
       });
       if (error) alert(error.message);
       else alert('Code sent! Check your email for the 6-digit code.');
@@ -225,37 +334,38 @@ export default function App() {
     // Verify the 6-digit code (PWA/iPhone friendly)
     async function verifySixDigitCode() {
       if (!email) return alert('Enter your email above first');
-      if (!/^\d{6}$/.test((otp || '').trim())) return alert('Enter the 6-digit code from the email');
+      if (!/^\d{6}$/.test((otp || '').trim()))
+        return alert('Enter the 6-digit code from the email');
 
       const { data, error } = await supabase.auth.verifyOtp({
         email,
         token: otp.trim(),
-        type: 'email'
+        type: 'email',
       });
       if (error) return alert(error.message);
       setSession(data?.session || null);
     }
 
     return (
-      <div style={{display:'grid',placeItems:'center',height:'100vh',background:'#000',color:'#fff',textAlign:'center',padding:16}}>
-        <div style={{maxWidth:360, width:'100%', background:'#111', borderRadius:12, padding:16, border:'1px solid #333'}}>
-          <h1 style={{marginBottom:8}}>MOM3NT DATA</h1>
-          <p style={{marginBottom:12, opacity:.9}}>Sign in with the 6-digit code sent to your email.</p>
+      <div style={{ display: 'grid', placeItems: 'center', height: '100vh', background: '#000', color: '#fff', textAlign: 'center', padding: 16 }}>
+        <div style={{ maxWidth: 360, width: '100%', background: '#111', borderRadius: 12, padding: 16, border: '1px solid #333' }}>
+          <h1 style={{ marginBottom: 8 }}>MOM3NT DATA</h1>
+          <p style={{ marginBottom: 12, opacity: 0.9 }}>Sign in with the 6-digit code sent to your email.</p>
 
-          {/* Email (white text on dark bg) */}
+          {/* Email */}
           <input
             type="email"
             placeholder="you@example.com"
             value={email}
-            onChange={(e)=>setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
             style={{
-              width:'100%',
-              padding:'10px',
-              borderRadius:10,
-              border:'1px solid #444',
-              marginBottom:8,
-              background:'#111',
-              color:'#fff'
+              width: '100%',
+              padding: '10px',
+              borderRadius: 10,
+              border: '1px solid #444',
+              marginBottom: 8,
+              background: '#111',
+              color: '#fff',
             }}
           />
 
@@ -263,14 +373,14 @@ export default function App() {
           <button
             onClick={sendCode}
             style={{
-              width:'100%',
-              padding:'10px',
-              borderRadius:10,
-              border:'1px solid #111',
-              background:'#dca636',
-              color:'#000',
-              fontWeight:700,
-              marginBottom:12
+              width: '100%',
+              padding: '10px',
+              borderRadius: 10,
+              border: '1px solid #111',
+              background: '#dca636',
+              color: '#000',
+              fontWeight: 700,
+              marginBottom: 12,
             }}
           >
             Send Code
@@ -284,30 +394,30 @@ export default function App() {
             maxLength={6}
             placeholder="Enter 6-digit code"
             value={otp}
-            onChange={(e)=>setOtp(e.target.value)}
+            onChange={(e) => setOtp(e.target.value)}
             style={{
-              width:'100%',
-              padding:'10px',
-              borderRadius:10,
-              border:'1px solid #444',
-              marginBottom:8,
-              background:'#111',
-              color:'#fff',
-              letterSpacing:2,
-              textAlign:'center',
-              fontWeight:700
+              width: '100%',
+              padding: '10px',
+              borderRadius: 10,
+              border: '1px solid #444',
+              marginBottom: 8,
+              background: '#111',
+              color: '#fff',
+              letterSpacing: 2,
+              textAlign: 'center',
+              fontWeight: 700,
             }}
           />
           <button
             onClick={verifySixDigitCode}
             style={{
-              width:'100%',
-              padding:'10px',
-              borderRadius:10,
-              border:'1px solid #333',
-              background:'#fff',
-              color:'#000',
-              fontWeight:700
+              width: '100%',
+              padding: '10px',
+              borderRadius: 10,
+              border: '1px solid #333',
+              background: '#fff',
+              color: '#000',
+              fontWeight: 700,
             }}
           >
             Verify & Sign In
@@ -324,15 +434,17 @@ export default function App() {
     const m = monthDate.getMonth();
     const first = new Date(y, m, 1);
     const start = first.getDay(); // 0 Sun
-    const days = new Date(y, m+1, 0).getDate();
-    const cells = [...range(start).map(() => null), ...range(days).map(d => new Date(y, m, d+1))];
+    const days = new Date(y, m + 1, 0).getDate();
+    const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
     return (
-      <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:6}}>
-        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-          <div key={d} style={{fontSize:12,color:'#666',textAlign:'center'}}>{d}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div key={d} style={{ fontSize: 12, color: '#666', textAlign: 'center' }}>
+            {d}
+          </div>
         ))}
-        {cells.map((d,i) => {
+        {cells.map((d, i) => {
           if (!d) return <div key={`sp-${i}`} />;
           const sel = iso(d) === iso(selectedDate);
           const today = iso(d) === iso(new Date());
@@ -342,16 +454,32 @@ export default function App() {
               key={d.toISOString()}
               onClick={() => setSelectedDate(d)}
               style={{
-                height:64,borderRadius:12,border:'1px solid #eee',
+                height: 64,
+                borderRadius: 12,
+                border: '1px solid #eee',
                 background: sel ? '#000' : '#fff',
                 color: sel ? '#fff' : '#111',
                 outline: today ? '2px solid #dca636' : 'none',
-                display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
               title={mov.name}
             >
-              <div style={{fontWeight:600,fontSize:14}}>{d.getDate()}</div>
-              <div style={{fontSize:10,opacity:.7,maxWidth:'9ch',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{mov.name}</div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{d.getDate()}</div>
+              <div
+                style={{
+                  fontSize: 10,
+                  opacity: 0.7,
+                  maxWidth: '9ch',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {mov.name}
+              </div>
             </button>
           );
         })}
@@ -360,18 +488,85 @@ export default function App() {
   }
 
   return (
-    <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
+    <div style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Arial', background: '#f6f7f9', minHeight: '100vh' }}>
       {/* Header with top tabs + profile + sign out */}
-      <header style={{position:'sticky',top:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'12px 12px',background:'#000',color:'#fff'}}>
-        <strong style={{whiteSpace:'nowrap'}}>MOM3NT DATA</strong>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
-          <button onClick={()=>setTab('calendar')}    style={{background:'transparent',color: tab==='calendar' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Calendar</button>
-          <button onClick={()=>setTab('database')}    style={{background:'transparent',color: tab==='database' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Database</button>
-          <button onClick={()=>setTab('leaderboard')} style={{background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Leaderboard</button>
-          <button onClick={()=>setProfileOpen(true)}  style={{background:'#111',color:'#fff',border:'1px solid #333',borderRadius:10,padding:'6px 10px'}}>Profile</button>
+      <header
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          padding: '12px 12px',
+          background: '#000',
+          color: '#fff',
+        }}
+      >
+        <strong style={{ whiteSpace: 'nowrap' }}>MOM3NT DATA</strong>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
-            onClick={async ()=>{ await supabase.auth.signOut(); setSession(null); }}
-            style={{background:'#dca636',color:'#000',border:'1px solid #333',borderRadius:10,padding:'6px 10px',fontWeight:700}}
+            onClick={() => setTab('calendar')}
+            style={{
+              background: 'transparent',
+              color: tab === 'calendar' ? '#dca636' : '#fff',
+              border: '1px solid #333',
+              borderRadius: 10,
+              padding: '6px 10px',
+            }}
+          >
+            Calendar
+          </button>
+          <button
+            onClick={() => setTab('database')}
+            style={{
+              background: 'transparent',
+              color: tab === 'database' ? '#dca636' : '#fff',
+              border: '1px solid #333',
+              borderRadius: 10,
+              padding: '6px 10px',
+            }}
+          >
+            Database
+          </button>
+          <button
+            onClick={() => setTab('leaderboard')}
+            style={{
+              background: 'transparent',
+              color: tab === 'leaderboard' ? '#dca636' : '#fff',
+              border: '1px solid '#333',
+              borderRadius: 10,
+              padding: '6px 10px',
+            }}
+          >
+            Leaderboard
+          </button>
+          <button
+            onClick={() => setProfileOpen(true)}
+            style={{
+              background: '#111',
+              color: '#fff',
+              border: '1px solid #333',
+              borderRadius: 10,
+              padding: '6px 10px',
+            }}
+          >
+            Profile
+          </button>
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut();
+              setSession(null);
+            }}
+            style={{
+              background: '#dca636',
+              color: '#000',
+              border: '1px solid #333',
+              borderRadius: 10,
+              padding: '6px 10px',
+              fontWeight: 700,
+            }}
           >
             Sign Out
           </button>
@@ -379,38 +574,40 @@ export default function App() {
       </header>
 
       {/* Content */}
-      <main style={{maxWidth:680, margin:'12px auto', padding:'0 12px 48px', color:'#000'}}>
+      <main style={{ maxWidth: 680, margin: '12px auto', padding: '0 12px 48px', color: '#000' }}>
         {tab === 'calendar' && (
           <section>
             {/* Month switcher */}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8, color:'#000'}}>
-              <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()-1, 1))}>◀︎</button>
-              <div style={{fontWeight:700, color:'#000'}}>{monthLabel(monthDate)}</div>
-              <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()+1, 1))}>▶︎</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, color: '#000' }}>
+              <button onClick={() => setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1))}>◀︎</button>
+              <div style={{ fontWeight: 700, color: '#000' }}>{monthLabel(monthDate)}</div>
+              <button onClick={() => setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1))}>▶︎</button>
             </div>
 
-            <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
+            <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)', color: '#000' }}>
               <CalendarGrid />
             </div>
 
             {/* Selected day movement + input */}
-            <div style={{marginTop:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+            <div style={{ marginTop: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)', color: '#000' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <div>
-                  <div style={{fontSize:12,color:'#000'}}>Selected: {iso(selectedDate)}</div>
-                  <div style={{fontWeight:700,color:'#000'}}>{movementForDate(selectedDate).name}</div>
-                  <div style={{fontSize:12,color:'#000'}}>Units: {movementForDate(selectedDate).unit}</div>
+                  <div style={{ fontSize: 12, color: '#000' }}>Selected: {iso(selectedDate)}</div>
+                  <div style={{ fontWeight: 700, color: '#000' }}>{movementForDate(selectedDate).name}</div>
+                  <div style={{ fontSize: 12, color: '#000' }}>Units: {movementForDate(selectedDate).unit}</div>
                 </div>
-                <div style={{display:'flex',gap:8}}>
+                <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type="number"
                     inputMode="decimal"
                     placeholder={`Enter ${movementForDate(selectedDate).unit}`}
                     value={inputVal}
-                    onChange={(e)=>setInputVal(e.target.value)}
-                    style={{padding:10,border:'1px solid #ddd',borderRadius:10,width:140}}
+                    onChange={(e) => setInputVal(e.target.value)}
+                    style={{ padding: 10, border: '1px solid #ddd', borderRadius: 10, width: 140 }}
                   />
-                  <button onClick={saveEntry} style={{padding:'10px 12px',borderRadius:10,background:'#000',color:'#fff'}}>Save</button>
+                  <button onClick={saveEntry} style={{ padding: '10px 12px', borderRadius: 10, background: '#000', color: '#fff' }}>
+                    Save
+                  </button>
                 </div>
               </div>
             </div>
@@ -419,16 +616,53 @@ export default function App() {
 
         {tab === 'database' && (
           <section>
-            {Object.values(MOVEMENTS).map((m) => {
-              const rows = (seriesByMovement[m.name] || []).slice(-20);
-              const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
+            {/* View selector */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <label style={{ fontSize: 12 }}>View:</label>
+              <select value={dbView} onChange={(e) => setDbView(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 8 }}>
+                <option value="this">This Cycle</option>
+                <option value="prev">Previous Cycle</option>
+                <option value="all">All Time</option>
+              </select>
+              {/* Optional: show date bounds when in cycle views */}
+              {dbView !== 'all' && CYCLES.length > 0 && (() => {
+                const idx = getCurrentCycleIndex(new Date());
+                if (idx >= 0) {
+                  const currentBounds = getCycleBounds(CYCLES[idx]);
+                  const prevBounds = idx > 0 ? getCycleBounds(CYCLES[idx - 1]) : null;
+                  const txt =
+                    dbView === 'this'
+                      ? `${iso(currentBounds.start)} → ${iso(currentBounds.end)}`
+                      : prevBounds
+                      ? `${iso(prevBounds.start)} → ${iso(prevBounds.end)}`
+                      : `Before ${iso(currentBounds.start)}`;
+                  return <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>{txt}</span>;
+                }
+                return null;
+              })()}
+            </div>
+
+            {/* Charts for whatever movements exist in the filtered range */}
+            {Array.from(dynamicSeries.entries()).length === 0 && (
+              <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                <div style={{ fontSize: 14 }}>No data yet for this view.</div>
+              </div>
+            )}
+
+            {Array.from(dynamicSeries.entries()).map(([movementName, { unit, rows }]) => {
+              const last20 = rows.slice(-20);
+              const data = last20.map((r) => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
+
               return (
-                <div key={m.key} style={{marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                    <div style={{fontWeight:700, color:'#000'}}>{m.name}</div>
-                    <div style={{fontSize:12,color:'#000'}}>{rows.length} entries • {m.unit}</div>
+                <div
+                  key={movementName}
+                  style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ fontWeight: 700, color: '#000' }}>{movementName}</div>
+                    <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
                   </div>
-                  <div style={{width:'100%', height:220}}>
+                  <div style={{ width: '100%', height: 220 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
                         <CartesianGrid stroke="#e5e7eb" />
@@ -442,7 +676,7 @@ export default function App() {
                             const p = payload && payload[0] && payload[0].payload;
                             return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
                           }}
-                          formatter={(val) => [`${val} ${m.unit}`, 'Value']}
+                          formatter={(val) => [`${val} ${unit}`, 'Value']}
                         />
                         <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
                       </LineChart>
@@ -456,21 +690,32 @@ export default function App() {
 
         {tab === 'leaderboard' && (
           <section>
-            <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
-              <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>{todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span></div>
+            <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)', color: '#000' }}>
+              <div style={{ fontSize: 12, color: '#000' }}>Today’s movement</div>
+              <div style={{ fontWeight: 700, marginBottom: 8, color: '#000' }}>
+                {todaysMovement.name} <span style={{ fontSize: 12, color: '#000' }}>({todaysMovement.unit})</span>
+              </div>
 
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                {['male','female'].map((g) => (
-                  <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
-                    <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
-                    <ol style={{marginTop:6,display:'grid',gap:6}}>
-                      {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
-                        <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
-                          <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
-                          <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
-                        </li>
-                      )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {['male', 'female'].map((g) => (
+                  <div key={g} style={{ background: '#f6f7f9', border: '1px solid #eee', borderRadius: 12, padding: 10, color: '#000' }}>
+                    <div style={{ fontWeight: 700, textTransform: 'capitalize', color: '#000' }}>Top 5 {g}</div>
+                    <ol style={{ marginTop: 6, display: 'grid', gap: 6 }}>
+                      {leaderboard[g].length ? (
+                        leaderboard[g].map((r, i) => (
+                          <li
+                            key={r.id}
+                            style={{ display: 'flex', justifyContent: 'space-between', background: '#fff', border: '1px solid #eee', borderRadius: 10, padding: '8px 10px', color: '#000' }}
+                          >
+                            <span style={{ fontSize: 14, color: '#000' }}>{i + 1}. {(r.name || 'Member').split(' ')[0]}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: '#000' }}>
+                              {r.value} {todaysMovement.unit}
+                            </span>
+                          </li>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#000' }}>No entries yet.</div>
+                      )}
                     </ol>
                   </div>
                 ))}
@@ -482,32 +727,37 @@ export default function App() {
 
       {/* Profile modal */}
       {profileOpen && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',display:'grid',placeItems:'center',padding:16}}>
-          <div style={{background:'#fff',borderRadius:12,padding:16,width:'min(92vw,420px)'}}>
-            <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>Profile</div>
-            <div style={{display:'grid',gap:8,color:'#000'}}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'grid', placeItems: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 16, width: 'min(92vw,420px)' }}>
+            <div style={{ fontWeight: 700, marginBottom: 8, color: '#000' }}>Profile</div>
+            <div style={{ display: 'grid', gap: 8, color: '#000' }}>
               <div>
-                <div style={{fontSize:12,color:'#000'}}>Name</div>
-                <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="First Last" style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}/>
+                <div style={{ fontSize: 12, color: '#000' }}>Name</div>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="First Last"
+                  style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 10 }}
+                />
               </div>
               <div>
-                <div style={{fontSize:12,color:'#000'}}>Gender</div>
-                <select value={gender} onChange={(e)=>setGender(e.target.value)} style={{width:'100%',padding:10,border:'1px solid #ddd',borderRadius:10}}>
+                <div style={{ fontSize: 12, color: '#000' }}>Gender</div>
+                <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 10 }}>
                   <option value="">Select</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
               </div>
-              <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:8}}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
                 <button
-                  onClick={()=>setProfileOpen(false)}
+                  onClick={() => setProfileOpen(false)}
                   style={{
-                    padding:'8px 12px',
-                    border:'1px solid #ccc',
-                    borderRadius:10,
-                    background:'#f0f0f0',
-                    color:'#000',
-                    cursor:'pointer'
+                    padding: '8px 12px',
+                    border: '1px solid #ccc',
+                    borderRadius: 10,
+                    background: '#f0f0f0',
+                    color: '#000',
+                    cursor: 'pointer',
                   }}
                 >
                   Close
@@ -515,18 +765,20 @@ export default function App() {
                 <button
                   onClick={saveProfile}
                   style={{
-                    padding:'8px 12px',
-                    border:'1px solid #111',
-                    borderRadius:10,
-                    background:'#000',
-                    color:'#fff',
-                    cursor:'pointer'
+                    padding: '8px 12px',
+                    border: '1px solid #111',
+                    borderRadius: 10,
+                    background: '#000',
+                    color: '#fff',
+                    cursor: 'pointer',
                   }}
                 >
                   Save Profile
                 </button>
               </div>
-              <div style={{fontSize:12,color:'#000'}}>Your name & gender are saved to your account and included with each entry for the leaderboard.</div>
+              <div style={{ fontSize: 12, color: '#000' }}>
+                Your name & gender are saved to your account and included with each entry for the leaderboard.
+              </div>
             </div>
           </div>
         </div>
