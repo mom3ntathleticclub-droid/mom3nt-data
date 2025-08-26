@@ -121,6 +121,9 @@ export default function App() {
   // Database view: Current Cycle | Previous Cycle | All Cycles
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
 
+  // Mobile detection for layout tweaks
+  const [isMobile, setIsMobile] = useState(false);
+
   // Data
   const [entries, setEntries] = useState([]);
 
@@ -187,6 +190,17 @@ export default function App() {
     localStorage.setItem('mom3nt_name', name || '');
     localStorage.setItem('mom3nt_gender', gender || '');
   }, [name, gender]);
+
+  // Detect mobile (<= 768px)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener ? mq.addEventListener('change', apply) : mq.addListener(apply);
+    return () => {
+      mq.removeEventListener ? mq.removeEventListener('change', apply) : mq.removeListener(apply);
+    };
+  }, []);
 
   // Save name/gender to Supabase (Upsert)
   async function saveProfile() {
@@ -268,6 +282,29 @@ export default function App() {
 
     return { currentCycle, previousCycle, currentBounds, previousBounds };
   }, []);
+
+  // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
+  const todaysMovement = movementForDate(new Date());
+  const leaderboard = useMemo(() => {
+    const rows = entries.filter(
+      (e) =>
+        e.movement === todaysMovement.name &&
+        (e.gender === 'male' || e.gender === 'female')
+    );
+    const bestMale = new Map();
+    const bestFemale = new Map();
+    for (const r of rows) {
+      const key = (r.name || 'Member').trim() || 'Member';
+      const bucket = r.gender === 'male' ? bestMale : bestFemale;
+      const prev = bucket.get(key);
+      if (!prev || Number(r.value) > Number(prev.value)) bucket.set(key, r);
+    }
+    const top5 = (m) =>
+      Array.from(m.values())
+        .sort((a, b) => Number(b.value) - Number(a.value))
+        .slice(0, 5);
+    return { male: top5(bestMale), female: top5(bestFemale) };
+  }, [entries, todaysMovement.name]);
 
   // ---------- LOGIN UI: email + 6-digit code ----------
   if (!session) {
@@ -379,15 +416,77 @@ export default function App() {
   }
   // ---------------------------------------------
 
+  // Mobile bottom input bar (fixed)
+  function MobileInputBar() {
+    const mov = movementForDate(selectedDate);
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: '#111',
+          color: '#fff',
+          padding: '10px 12px',
+          borderTop: '1px solid #333',
+          display: 'grid',
+          gridTemplateColumns: '1fr auto auto',
+          gap: 8,
+          alignItems: 'center',
+          zIndex: 30,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, opacity: 0.9 }}>Selected: {iso(selectedDate)}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {mov.name} ({mov.unit})
+          </div>
+        </div>
+        <input
+          type="number"
+          inputMode="decimal"
+          placeholder={mov.unit}
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          style={{
+            width: 110,
+            padding: '8px 10px',
+            borderRadius: 8,
+            border: '1px solid #444',
+            background: '#000',
+            color: '#fff',
+            textAlign: 'center',
+          }}
+        />
+        <button
+          onClick={saveEntry}
+          style={{
+            padding: '9px 12px',
+            borderRadius: 8,
+            background: '#dca636',
+            color: '#000',
+            border: '1px solid #333',
+            fontWeight: 800,
+          }}
+        >
+          Save
+        </button>
+      </div>
+    );
+  }
+
   // Calendar grid (mobile friendly)
   function CalendarGrid() {
-  const y = monthDate.getFullYear();
-  const m = monthDate.getMonth();
-  const first = new Date(y, m, 1);
-  const start = first.getDay(); // 0 Sun
-  const days = new Date(y, m + 1, 0).getDate();  // ✅ fixed
-  const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
+    const y = monthDate.getFullYear();
+    const m = monthDate.getMonth();
+    const first = new Date(y, m, 1);
+    const start = first.getDay(); // 0 Sun
+    const days = new Date(y, m + 1, 0).getDate();
+    const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
+    // Square-ish cells that fit 7 columns wide; smaller on mobile
+    const cellBase = isMobile ? 44 : 64;
 
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
@@ -400,38 +499,24 @@ export default function App() {
           if (!d) return <div key={`sp-${i}`} />;
           const sel = iso(d) === iso(selectedDate);
           const today = iso(d) === iso(new Date());
-          const mov = movementForDate(d);
           return (
             <button
               key={d.toISOString()}
               onClick={() => setSelectedDate(d)}
               style={{
-                height: 64,
-                borderRadius: 12,
-                border: '1px solid #eee',
+                height: cellBase,
+                borderRadius: 10,
+                border: '1px solid #e5e5e5',
                 background: sel ? '#000' : '#fff',
                 color: sel ? '#fff' : '#111',
                 outline: today ? '2px solid #dca636' : 'none',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
+                display: 'grid',
+                placeItems: 'center',
+                fontWeight: sel ? 800 : 600,
               }}
-              title={mov.name}
+              title={movementForDate(d).name}
             >
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{d.getDate()}</div>
-              <div
-                style={{
-                  fontSize: 10,
-                  opacity: 0.7,
-                  maxWidth: '9ch',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {mov.name}
-              </div>
+              {d.getDate()}
             </button>
           );
         })}
@@ -526,7 +611,14 @@ export default function App() {
       </header>
 
       {/* Content */}
-      <main style={{ maxWidth: 680, margin: '12px auto', padding: '0 12px 48px', color: '#000' }}>
+      <main
+        style={{
+          maxWidth: 680,
+          margin: '12px auto',
+          padding: `0 12px ${isMobile ? '72px' : '48px'}`, // extra bottom space for mobile input bar
+          color: '#000',
+        }}
+      >
         {tab === 'calendar' && (
           <section>
             {/* Month switcher */}
@@ -540,235 +632,42 @@ export default function App() {
               <CalendarGrid />
             </div>
 
-            {/* Selected day movement + input */}
-            <div style={{ marginTop: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)', color: '#000' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 12, color: '#000' }}>Selected: {iso(selectedDate)}</div>
-                  <div style={{ fontWeight: 700, color: '#000' }}>{movementForDate(selectedDate).name}</div>
-                  <div style={{ fontSize: 12, color: '#000' }}>Units: {movementForDate(selectedDate).unit}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    placeholder={`Enter ${movementForDate(selectedDate).unit}`}
-                    value={inputVal}
-                    onChange={(e) => setInputVal(e.target.value)}
-                    style={{ padding: 10, border: '1px solid #ddd', borderRadius: 10, width: 140 }}
-                  />
-                  <button onClick={saveEntry} style={{ padding: '10px 12px', borderRadius: 10, background: '#000', color: '#fff' }}>
-                    Save
-                  </button>
+            {/* Selected day movement + input (desktop/tablet only) */}
+            {!isMobile && (
+              <div style={{ marginTop: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)', color: '#000' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#000' }}>Selected: {iso(selectedDate)}</div>
+                    <div style={{ fontWeight: 700, color: '#000' }}>{movementForDate(selectedDate).name}</div>
+                    <div style={{ fontSize: 12, color: '#000' }}>Units: {movementForDate(selectedDate).unit}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      placeholder={`Enter ${movementForDate(selectedDate).unit}`}
+                      value={inputVal}
+                      onChange={(e) => setInputVal(e.target.value)}
+                      style={{ padding: 10, border: '1px solid #ddd', borderRadius: 10, width: 160 }}
+                    />
+                    <button onClick={saveEntry} style={{ padding: '10px 12px', borderRadius: 10, background: '#000', color: '#fff' }}>
+                      Save
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </section>
         )}
 
         {tab === 'database' && (
           <section>
             {/* View selector */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <label style={{ fontSize: 12 }}>View:</label>
-              <select
-                value={dbView}
-                onChange={(e) => setDbView(e.target.value)}
-                style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 8 }}
-              >
-                <option value="this">Current Cycle</option>
-                <option value="prev">Previous Cycle</option>
-                <option value="all">All Cycles</option>
-              </select>
-
-              {/* Date badges for cycle views */}
-              {dbView === 'this' && cycleContext.currentBounds && (
-                <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
-                  {iso(cycleContext.currentBounds.start)} → {iso(cycleContext.currentBounds.end)}
-                </span>
-              )}
-              {dbView === 'prev' && cycleContext.previousBounds && (
-                <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
-                  {iso(cycleContext.previousBounds.start)} → {iso(cycleContext.previousBounds.end)}
-                </span>
-              )}
-            </div>
-
-            {/* ========== CURRENT CYCLE ========== */}
-            {dbView === 'this' && (
-              <>
-                {!cycleContext.currentCycle ? (
-                  <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                    <div style={{ fontSize: 14 }}>No active cycle configured.</div>
-                  </div>
-                ) : (
-                  movementsFromTemplate(cycleContext.currentCycle.weekTemplate).map(({ weekday, name: movementName, unit }) => {
-                    const rows = myEntries
-                      .filter(e =>
-                        cycleContext.currentBounds &&
-                        isWithinISO(e.date, cycleContext.currentBounds.start, cycleContext.currentBounds.end) &&
-                        e.movement === movementName
-                      )
-                      .map(e => ({ date: e.date, value: Number(e.value) }))
-                      .sort((a, b) => a.date.localeCompare(b.date));
-
-                    const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
-                    return (
-                      <div key={`this-${weekday}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <div style={{ fontWeight: 700, color: '#000' }}>{weekday}: {movementName}</div>
-                          <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
-                        </div>
-                        <div style={{ width: '100%', height: 220 }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                              <CartesianGrid stroke="#e5e7eb" />
-                              <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                              <YAxis tick={{ fill: '#000' }} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                                labelStyle={{ color: '#000' }}
-                                itemStyle={{ color: '#000' }}
-                                labelFormatter={(label, payload) => {
-                                  const p = payload && payload[0] && payload[0].payload;
-                                  return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                                }}
-                                formatter={(val) => [`${val} ${unit}`, 'Value']}
-                              />
-                              <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </>
-            )}
-
-            {/* ========== PREVIOUS CYCLE ========== */}
-            {dbView === 'prev' && (
-              <>
-                {!cycleContext.previousCycle ? (
-                  <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                    <div style={{ fontSize: 14 }}>No previous cycle configured.</div>
-                  </div>
-                ) : (
-                  movementsFromTemplate(cycleContext.previousCycle.weekTemplate).map(({ weekday, name: movementName, unit }) => {
-                    const rows = myEntries
-                      .filter(e =>
-                        cycleContext.previousBounds &&
-                        isWithinISO(e.date, cycleContext.previousBounds.start, cycleContext.previousBounds.end) &&
-                        e.movement === movementName
-                      )
-                      .map(e => ({ date: e.date, value: Number(e.value) }))
-                      .sort((a, b) => a.date.localeCompare(b.date));
-
-                    const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
-                    return (
-                      <div key={`prev-${weekday}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <div style={{ fontWeight: 700, color: '#000' }}>{weekday}: {movementName}</div>
-                          <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
-                        </div>
-                        <div style={{ width: '100%', height: 220 }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                              <CartesianGrid stroke="#e5e7eb" />
-                              <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                              <YAxis tick={{ fill: '#000' }} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                                labelStyle={{ color: '#000' }}
-                                itemStyle={{ color: '#000' }}
-                                labelFormatter={(label, payload) => {
-                                  const p = payload && payload[0] && payload[0].payload;
-                                  return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                                }}
-                                formatter={(val) => [`${val} ${unit}`, 'Value']}
-                              />
-                              <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </>
-            )}
-
-            {/* ========== ALL CYCLES (All Time; ALWAYS show 14 movements) ========== */}
-            {dbView === 'all' && (
-              <>
-                {(() => {
-                  // Build the canonical list of movement names & units from:
-                  // - legacy MOVEMENTS (7)
-                  // - every cycle's weekTemplate (7 per cycle)
-                  const movementMap = new Map(); // name -> unit
-                  // Legacy
-                  Object.values(MOVEMENTS).forEach(m => {
-                    if (m?.name) movementMap.set(m.name, m.unit || '');
-                  });
-                  // Cycles
-                  CYCLES.forEach(cy => {
-                    Object.values(cy.weekTemplate).forEach(m => {
-                      if (m?.name && !movementMap.has(m.name)) {
-                        movementMap.set(m.name, m.unit || '');
-                      }
-                    });
-                  });
-
-                  const movementList = Array.from(movementMap.entries()).map(([name, unit]) => ({ name, unit }));
-
-                  if (!movementList.length) {
-                    return (
-                      <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                        <div style={{ fontSize: 14 }}>No movements configured.</div>
-                      </div>
-                    );
-                  }
-
-                  return movementList.map(({ name: movementName, unit }) => {
-                    // Pull ALL entries ever recorded for this movement
-                    const rows = myEntries
-                      .filter(e => e.movement === movementName)
-                      .map(e => ({ date: e.date, value: Number(e.value) }))
-                      .sort((a, b) => a.date.localeCompare(b.date));
-
-                    const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
-                    return (
-                      <div key={`all-${movementName}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <div style={{ fontWeight: 700, color: '#000' }}>{movementName}</div>
-                          <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
-                        </div>
-                        <div style={{ width: '100%', height: 220 }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                              <CartesianGrid stroke="#e5e7eb" />
-                              <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                              <YAxis tick={{ fill: '#000' }} />
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                                labelStyle={{ color: '#000' }}
-                                itemStyle={{ color: '#000' }}
-                                labelFormatter={(label, payload) => {
-                                  const p = payload && payload[0] && payload[0].payload;
-                                  return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                                }}
-                                formatter={(val) => [`${val} ${unit}`, 'Value']}
-                              />
-                              <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </>
-            )}
+            <DatabaseSection
+              dbView={dbView}
+              setDbView={setDbView}
+              myEntries={myEntries}
+            />
           </section>
         )}
 
@@ -808,6 +707,9 @@ export default function App() {
           </section>
         )}
       </main>
+
+      {/* Mobile bottom input bar */}
+      {tab === 'calendar' && isMobile && <MobileInputBar />}
 
       {/* Profile modal */}
       {profileOpen && (
@@ -867,6 +769,195 @@ export default function App() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- Database Section (unchanged logic, refactored into component) ---------------- */
+
+function DatabaseSection({ dbView, setDbView, myEntries }) {
+  const { currentCycle, previousCycle, currentBounds, previousBounds } = useMemo(() => {
+    const idx = getCurrentCycleIndex(new Date());
+    let curr = idx >= 0 ? CYCLES[idx] : null;
+    let prev = idx > 0 ? CYCLES[idx - 1] : null;
+    if (!curr && CYCLES.length) {
+      curr = CYCLES[CYCLES.length - 1];
+      prev = CYCLES.length > 1 ? CYCLES[CYCLES.length - 2] : null;
+    }
+    return {
+      currentCycle: curr,
+      previousCycle: prev,
+      currentBounds: curr ? getCycleBounds(curr) : null,
+      previousBounds: prev ? getCycleBounds(prev) : null,
+    };
+  }, []);
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <label style={{ fontSize: 12 }}>View:</label>
+        <select
+          value={dbView}
+          onChange={(e) => setDbView(e.target.value)}
+          style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 8 }}
+        >
+          <option value="this">Current Cycle</option>
+          <option value="prev">Previous Cycle</option>
+          <option value="all">All Cycles</option>
+        </select>
+
+        {dbView === 'this' && currentBounds && (
+          <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
+            {iso(currentBounds.start)} → {iso(currentBounds.end)}
+          </span>
+        )}
+        {dbView === 'prev' && previousBounds && (
+          <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
+            {iso(previousBounds.start)} → {iso(previousBounds.end)}
+          </span>
+        )}
+      </div>
+
+      {/* Current Cycle */}
+      {dbView === 'this' && (
+        <>
+          {!currentCycle ? (
+            <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+              <div style={{ fontSize: 14 }}>No active cycle configured.</div>
+            </div>
+          ) : (
+            movementsFromTemplate(currentCycle.weekTemplate).map(({ weekday, name: movementName, unit }) => {
+              const rows = myEntries
+                .filter(
+                  (e) =>
+                    currentBounds &&
+                    isWithinISO(e.date, currentBounds.start, currentBounds.end) &&
+                    e.movement === movementName
+                )
+                .map((e) => ({ date: e.date, value: Number(e.value) }))
+                .sort((a, b) => a.date.localeCompare(b.date));
+
+              const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) }));
+              return (
+                <ChartCard
+                  key={`this-${weekday}`}
+                  title={`${weekday}: ${movementName}`}
+                  unit={unit}
+                  rows={rows}
+                  data={data}
+                />
+              );
+            })
+          )}
+        </>
+      )}
+
+      {/* Previous Cycle */}
+      {dbView === 'prev' && (
+        <>
+          {!previousCycle ? (
+            <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+              <div style={{ fontSize: 14 }}>No previous cycle configured.</div>
+            </div>
+          ) : (
+            movementsFromTemplate(previousCycle.weekTemplate).map(({ weekday, name: movementName, unit }) => {
+              const rows = myEntries
+                .filter(
+                  (e) =>
+                    previousBounds &&
+                    isWithinISO(e.date, previousBounds.start, previousBounds.end) &&
+                    e.movement === movementName
+                )
+                .map((e) => ({ date: e.date, value: Number(e.value) }))
+                .sort((a, b) => a.date.localeCompare(b.date));
+
+              const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) }));
+              return (
+                <ChartCard
+                  key={`prev-${weekday}`}
+                  title={`${weekday}: ${movementName}`}
+                  unit={unit}
+                  rows={rows}
+                  data={data}
+                />
+              );
+            })
+          )}
+        </>
+      )}
+
+      {/* All Cycles (All-time) */}
+      {dbView === 'all' && (
+        <>
+          {(() => {
+            // canonical set of movement names across legacy + cycles
+            const movementMap = new Map();
+            Object.values(MOVEMENTS).forEach((m) => m?.name && movementMap.set(m.name, m.unit || ''));
+            CYCLES.forEach((cy) => {
+              Object.values(cy.weekTemplate).forEach((m) => {
+                if (m?.name && !movementMap.has(m.name)) movementMap.set(m.name, m.unit || '');
+              });
+            });
+
+            const movementList = Array.from(movementMap.entries()).map(([name, unit]) => ({ name, unit }));
+            if (!movementList.length) {
+              return (
+                <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                  <div style={{ fontSize: 14 }}>No movements configured.</div>
+                </div>
+              );
+            }
+
+            return movementList.map(({ name: movementName, unit }) => {
+              const rows = myEntries
+                .filter((e) => e.movement === movementName)
+                .map((e) => ({ date: e.date, value: Number(e.value) }))
+                .sort((a, b) => a.date.localeCompare(b.date));
+              const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) }));
+              return (
+                <ChartCard
+                  key={`all-${movementName}`}
+                  title={movementName}
+                  unit={unit}
+                  rows={rows}
+                  data={data}
+                />
+              );
+            });
+          })()}
+        </>
+      )}
+    </>
+  );
+}
+
+function ChartCard({ title, unit, rows, data }) {
+  return (
+    <div style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontWeight: 700, color: '#000' }}>{title}</div>
+        <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+      </div>
+      <div style={{ width: '100%', height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+            <CartesianGrid stroke="#e5e7eb" />
+            <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+            <YAxis tick={{ fill: '#000' }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+              labelStyle={{ color: '#000' }}
+              itemStyle={{ color: '#000' }}
+              labelFormatter={(label, payload) => {
+                const p = payload && payload[0] && payload[0].payload;
+                return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+              }}
+              formatter={(val) => [`${val} ${unit}`, 'Value']}
+            />
+            <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
