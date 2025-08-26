@@ -144,6 +144,8 @@ export default function App() {
     if (!v || v <= 0) return alert('Enter a positive number.');
 
     const mov = movementForDate(selectedDate);
+
+    // Build row (client ensures one record per (user_id, date, movement); server enforces via unique index)
     const row = {
       user_id: session.user.id,
       date: iso(selectedDate),
@@ -154,11 +156,21 @@ export default function App() {
       gender
     };
 
-    const { error } = await supabase.from('entries').insert(row);
+    // ********** CHANGED: insert -> upsert with onConflict **********
+    // This will REPLACE the existing row if a record already exists for the same (user_id, date, movement)
+    const { error } = await supabase
+      .from('entries')
+      .upsert(row, { onConflict: ['user_id', 'date', 'movement'] });
+
     if (error) return alert(error.message);
     setInputVal('');
 
-    const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
+    // Refresh entries after write
+    const { data } = await supabase
+      .from('entries')
+      .select('*')
+      .order('date', { ascending: true });
+
     setEntries(data || []);
   }
 
@@ -181,7 +193,9 @@ export default function App() {
   // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
   const leaderboard = useMemo(() => {
-    const rows = entries.filter(e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female'));
+    const rows = entries.filter(
+      e => e.movement === todaysMovement.name && (e.gender === 'male' || e.gender === 'female')
+    );
     const bestMale = new Map();
     const bestFemale = new Map();
     for (const r of rows) {
@@ -501,7 +515,7 @@ export default function App() {
                   onClick={saveProfile}
                   style={{
                     padding:'8px 12px',
-                    border:'1px solid #111',
+                    border:'1px solid '#111',
                     borderRadius:10,
                     background:'#000',
                     color:'#fff',
