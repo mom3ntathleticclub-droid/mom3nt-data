@@ -535,7 +535,7 @@ export default function App() {
             style={{
               background: 'transparent',
               color: tab === 'leaderboard' ? '#dca636' : '#fff',
-              border: '1px solid '#333',
+              border: '1px solid #333',
               borderRadius: 10,
               padding: '6px 10px',
             }}
