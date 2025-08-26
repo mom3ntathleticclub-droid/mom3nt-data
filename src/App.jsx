@@ -160,7 +160,8 @@ export default function App() {
     // This will REPLACE the existing row if a record already exists for the same (user_id, date, movement)
     const { error } = await supabase
       .from('entries')
-      .upsert(row, { onConflict: ['user_id', 'date', 'movement'] });
+      .upsert(row, { onConflict: 'user_id,date' });
+
 
     if (error) return alert(error.message);
     setInputVal('');
