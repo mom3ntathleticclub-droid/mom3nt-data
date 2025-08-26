@@ -11,26 +11,6 @@ const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: '
 const range = (n) => Array.from({ length: n }, (_, i) => i);
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-// Monday-start week helpers
-function startOfWeekMonday(d) {
-  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const w = day.getDay(); // 0=Sun..6=Sat
-  const delta = (w + 6) % 7; // days since Monday
-  day.setDate(day.getDate() - delta);
-  return day;
-}
-function endOfWeekMonday(d) {
-  const s = startOfWeekMonday(d);
-  const e = new Date(s);
-  e.setDate(e.getDate() + 6); // Mon..Sun
-  return e;
-}
-function addDays(d, days) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + days);
-  return x;
-}
-
 // ---------- Legacy static mapping (fallback outside cycles) ----------
 const MOVEMENTS = {
   Sunday:    { key: 'sun', name: '3 Rep Max Landmine clean', unit: 'lbs' },
@@ -97,6 +77,15 @@ function isWithinISO(dateISO, start, end) {
   return d >= start && d <= end;
 }
 
+// Weekday order for rendering 7 movements consistently
+const WEEKDAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+function movementsFromTemplate(weekTemplate) {
+  return WEEKDAY_ORDER.map(weekday => {
+    const mov = weekTemplate[weekday];
+    return mov ? { weekday, ...mov } : null;
+  }).filter(Boolean);
+}
+
 // Parse #hash params like access_token, refresh_token, etc.
 function parseHash() {
   if (!window.location.hash || window.location.hash.length < 2) return {};
@@ -129,8 +118,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
 
-  // Database view: this week | previous week | all time
-  // (labels kept as 'this', 'prev', 'all' but semantics are week-based)
+  // Database view: Current Cycle | Previous Cycle | All Cycles
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
 
   // Data
@@ -262,55 +250,24 @@ export default function App() {
     return entries.filter((e) => e.user_id === session.user.id);
   }, [entries, session]);
 
-  // ---------- Database tab logic ----------
-  // Decide which week we're showing (Mon..Sun)
-  const selectedWeekBounds = useMemo(() => {
-    if (dbView === 'all') return null; // all-time mode
-    const today = new Date();
-    const base = dbView === 'this' ? today : addDays(today, -7);
-    const start = startOfWeekMonday(base);
-    const end = endOfWeekMonday(base);
-    return { start, end };
-  }, [dbView]);
+  // ---------- Database tab (Current/Previous/All Cycles) ----------
+  // Determine current/previous cycle and date bounds
+  const cycleContext = useMemo(() => {
+    const idx = getCurrentCycleIndex(new Date());
+    let currentCycle = idx >= 0 ? CYCLES[idx] : null;
+    let previousCycle = idx > 0 ? CYCLES[idx - 1] : null;
 
-  // Build the 7 movements for the selected week (even if no data yet)
-  const selectedWeekMovements = useMemo(() => {
-    if (!selectedWeekBounds) return [];
-    const { start } = selectedWeekBounds;
-    // Build the exact 7 dates of the week (Mon..Sun)
-    const days = range(7).map((i) => addDays(start, i));
-    // Map each day to the movement for that calendar day (cycle-aware)
-    return days.map((d) => {
-      const dn = dayName(d);
-      const mov = movementForDate(d);
-      return { weekday: dn, date: iso(d), ...mov };
-    });
-  }, [selectedWeekBounds]);
-
-  // Entries filtered to the selected week (for this/prev views) or all (for all-time)
-  const filteredMyEntries = useMemo(() => {
-    if (!session) return [];
-    const mine = myEntries;
-    if (!selectedWeekBounds) return mine; // all-time
-    const { start, end } = selectedWeekBounds;
-    return mine.filter((e) => isWithinISO(e.date, start, end));
-  }, [myEntries, selectedWeekBounds, session]);
-
-  // For all-time: dynamic list of all movements with full history
-  const allTimeSeries = useMemo(() => {
-    const map = new Map(); // movementName -> { unit, rows: [{date, value}] }
-    for (const e of myEntries) {
-      if (!map.has(e.movement)) {
-        map.set(e.movement, { unit: e.unit, rows: [] });
-      }
-      const obj = map.get(e.movement);
-      obj.rows.push({ date: e.date, value: Number(e.value) });
+    // If not inside any active cycle but cycles exist, treat the latest as "current"
+    if (!currentCycle && CYCLES.length) {
+      currentCycle = CYCLES[CYCLES.length - 1];
+      previousCycle = CYCLES.length > 1 ? CYCLES[CYCLES.length - 2] : null;
     }
-    for (const v of map.values()) {
-      v.rows.sort((a, b) => a.date.localeCompare(b.date));
-    }
-    return map;
-  }, [myEntries]);
+
+    const currentBounds = currentCycle ? getCycleBounds(currentCycle) : null;
+    const previousBounds = previousCycle ? getCycleBounds(previousCycle) : null;
+
+    return { currentCycle, previousCycle, currentBounds, previousBounds };
+  }, []);
 
   // Leaderboard for TODAY’S movement — Top 5 per gender, one record per person (best)
   const todaysMovement = movementForDate(new Date());
@@ -636,110 +593,186 @@ export default function App() {
             {/* View selector */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <label style={{ fontSize: 12 }}>View:</label>
-              <select value={dbView} onChange={(e) => setDbView(e.target.value)} style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 8 }}>
-                <option value="this">This Week</option>
-                <option value="prev">Previous Week</option>
-                <option value="all">All Time</option>
+              <select
+                value={dbView}
+                onChange={(e) => setDbView(e.target.value)}
+                style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 8 }}
+              >
+                <option value="this">Current Cycle</option>
+                <option value="prev">Previous Cycle</option>
+                <option value="all">All Cycles</option>
               </select>
-              {/* Date badge */}
-              {dbView !== 'all' && selectedWeekBounds && (
+
+              {/* Date badges for cycle views */}
+              {dbView === 'this' && cycleContext.currentBounds && (
                 <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
-                  {iso(selectedWeekBounds.start)} → {iso(selectedWeekBounds.end)}
+                  {iso(cycleContext.currentBounds.start)} → {iso(cycleContext.currentBounds.end)}
+                </span>
+              )}
+              {dbView === 'prev' && cycleContext.previousBounds && (
+                <span style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
+                  {iso(cycleContext.previousBounds.start)} → {iso(cycleContext.previousBounds.end)}
                 </span>
               )}
             </div>
 
-            {/* WEEK VIEWS: always show all 7 movements */}
-            {dbView !== 'all' && (
+            {/* ========== CURRENT CYCLE ========== */}
+            {dbView === 'this' && (
               <>
-                {selectedWeekMovements.map(({ weekday, name: movementName, unit }) => {
-                  const rows = filteredMyEntries
-                    .filter((e) => e.movement === movementName)
-                    .map((e) => ({ date: e.date, value: Number(e.value) }))
-                    .sort((a, b) => a.date.localeCompare(b.date));
+                {!cycleContext.currentCycle ? (
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                    <div style={{ fontSize: 14 }}>No active cycle configured.</div>
+                  </div>
+                ) : (
+                  movementsFromTemplate(cycleContext.currentCycle.weekTemplate).map(({ weekday, name: movementName, unit }) => {
+                    const rows = myEntries
+                      .filter(e =>
+                        cycleContext.currentBounds &&
+                        isWithinISO(e.date, cycleContext.currentBounds.start, cycleContext.currentBounds.end) &&
+                        e.movement === movementName
+                      )
+                      .map(e => ({ date: e.date, value: Number(e.value) }))
+                      .sort((a, b) => a.date.localeCompare(b.date));
 
-                  const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
-
-                  return (
-                    <div
-                      key={weekday}
-                      style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                        <div style={{ fontWeight: 700, color: '#000' }}>
-                          {weekday}: {movementName}
+                    const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
+                    return (
+                      <div key={`this-${weekday}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <div style={{ fontWeight: 700, color: '#000' }}>{weekday}: {movementName}</div>
+                          <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
                         </div>
-                        <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+                        <div style={{ width: '100%', height: 220 }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+                              <CartesianGrid stroke="#e5e7eb" />
+                              <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+                              <YAxis tick={{ fill: '#000' }} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+                                labelStyle={{ color: '#000' }}
+                                itemStyle={{ color: '#000' }}
+                                labelFormatter={(label, payload) => {
+                                  const p = payload && payload[0] && payload[0].payload;
+                                  return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+                                }}
+                                formatter={(val) => [`${val} ${unit}`, 'Value']}
+                              />
+                              <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
                       </div>
-                      <div style={{ width: '100%', height: 220 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                            <CartesianGrid stroke="#e5e7eb" />
-                            <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                            <YAxis tick={{ fill: '#000' }} />
-                            <Tooltip
-                              contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                              labelStyle={{ color: '#000' }}
-                              itemStyle={{ color: '#000' }}
-                              labelFormatter={(label, payload) => {
-                                const p = payload && payload[0] && payload[0].payload;
-                                return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                              }}
-                              formatter={(val) => [`${val} ${unit}`, 'Value']}
-                            />
-                            <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </>
             )}
 
-            {/* ALL-TIME VIEW: dynamic list of every movement ever tracked */}
+            {/* ========== PREVIOUS CYCLE ========== */}
+            {dbView === 'prev' && (
+              <>
+                {!cycleContext.previousCycle ? (
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                    <div style={{ fontSize: 14 }}>No previous cycle configured.</div>
+                  </div>
+                ) : (
+                  movementsFromTemplate(cycleContext.previousCycle.weekTemplate).map(({ weekday, name: movementName, unit }) => {
+                    const rows = myEntries
+                      .filter(e =>
+                        cycleContext.previousBounds &&
+                        isWithinISO(e.date, cycleContext.previousBounds.start, cycleContext.previousBounds.end) &&
+                        e.movement === movementName
+                      )
+                      .map(e => ({ date: e.date, value: Number(e.value) }))
+                      .sort((a, b) => a.date.localeCompare(b.date));
+
+                    const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
+                    return (
+                      <div key={`prev-${weekday}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <div style={{ fontWeight: 700, color: '#000' }}>{weekday}: {movementName}</div>
+                          <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+                        </div>
+                        <div style={{ width: '100%', height: 220 }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+                              <CartesianGrid stroke="#e5e7eb" />
+                              <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+                              <YAxis tick={{ fill: '#000' }} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+                                labelStyle={{ color: '#000' }}
+                                itemStyle={{ color: '#000' }}
+                                labelFormatter={(label, payload) => {
+                                  const p = payload && payload[0] && payload[0].payload;
+                                  return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+                                }}
+                                formatter={(val) => [`${val} ${unit}`, 'Value']}
+                              />
+                              <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </>
+            )}
+
+            {/* ========== ALL CYCLES (All Time) ========== */}
             {dbView === 'all' && (
               <>
-                {Array.from(allTimeSeries.entries()).length === 0 && (
-                  <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
-                    <div style={{ fontSize: 14 }}>No data yet.</div>
-                  </div>
-                )}
+                {(() => {
+                  // Build all-time series across all movements
+                  const map = new Map(); // movementName -> { unit, rows }
+                  for (const e of myEntries) {
+                    if (!map.has(e.movement)) map.set(e.movement, { unit: e.unit, rows: [] });
+                    map.get(e.movement).rows.push({ date: e.date, value: Number(e.value) });
+                  }
+                  for (const v of map.values()) v.rows.sort((a, b) => a.date.localeCompare(b.date));
 
-                {Array.from(allTimeSeries.entries()).map(([movementName, { unit, rows }]) => {
-                  const data = rows.map((r) => ({ ...r, shortDate: r.date.slice(5) })); // "MM-DD"
-                  return (
-                    <div
-                      key={movementName}
-                      style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                        <div style={{ fontWeight: 700, color: '#000' }}>{movementName}</div>
-                        <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+                  const entriesArr = Array.from(map.entries());
+                  if (!entriesArr.length) {
+                    return (
+                      <div style={{ background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                        <div style={{ fontSize: 14 }}>No data yet.</div>
                       </div>
-                      <div style={{ width: '100%', height: 220 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                            <CartesianGrid stroke="#e5e7eb" />
-                            <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
-                            <YAxis tick={{ fill: '#000' }} />
-                            <Tooltip
-                              contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
-                              labelStyle={{ color: '#000' }}
-                              itemStyle={{ color: '#000' }}
-                              labelFormatter={(label, payload) => {
-                                const p = payload && payload[0] && payload[0].payload;
-                                return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
-                              }}
-                              formatter={(val) => [`${val} ${unit}`, 'Value']}
-                            />
-                            <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
-                          </LineChart>
-                        </ResponsiveContainer>
+                    );
+                  }
+
+                  return entriesArr.map(([movementName, { unit, rows }]) => {
+                    const data = rows.map(r => ({ ...r, shortDate: r.date.slice(5) }));
+                    return (
+                      <div key={`all-${movementName}`} style={{ marginBottom: 12, background: '#fff', borderRadius: 12, padding: 12, boxShadow: '0 1px 2px rgba(0,0,0,.06)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <div style={{ fontWeight: 700, color: '#000' }}>{movementName}</div>
+                          <div style={{ fontSize: 12, color: '#000' }}>{rows.length} entries • {unit}</div>
+                        </div>
+                        <div style={{ width: '100%', height: 220 }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
+                              <CartesianGrid stroke="#e5e7eb" />
+                              <XAxis dataKey="shortDate" tick={{ fill: '#000' }} />
+                              <YAxis tick={{ fill: '#000' }} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #000', color: '#000' }}
+                                labelStyle={{ color: '#000' }}
+                                itemStyle={{ color: '#000' }}
+                                labelFormatter={(label, payload) => {
+                                  const p = payload && payload[0] && payload[0].payload;
+                                  return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
+                                }}
+                                formatter={(val) => [`${val} ${unit}`, 'Value']}
+                              />
+                              <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r: 4 }} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </>
             )}
           </section>
