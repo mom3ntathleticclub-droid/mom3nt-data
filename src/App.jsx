@@ -349,7 +349,7 @@ export default function App() {
   }
   // ---------------------------------------------
 
-  // Calendar grid (now tighter on mobile) + inline input section
+  // Calendar grid (width-driven squares; no horizontal scroll) + inline input section
   function CalendarGrid() {
     const y = monthDate.getFullYear();
     const m = monthDate.getMonth();
@@ -358,12 +358,20 @@ export default function App() {
     const days = new Date(y, m + 1, 0).getDate();
     const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
-    const gap = isMobile ? 4 : 6;
-    const cellBase = isMobile ? 38 : 64; // reduced for iPhone fit
+    // Tighten horizontal footprint for iPhone widths
+    const gap = isMobile ? 2 : 6;
 
     return (
       <>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+            gap,
+            width: '100%',
+            boxSizing: 'border-box',
+          }}
+        >
           {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
             <div key={d} style={{ fontSize: isMobile ? 10 : 12, color:'#666', textAlign:'center', paddingBottom: isMobile ? 2 : 4 }}>
               {d}
@@ -378,7 +386,9 @@ export default function App() {
                 key={d.toISOString()}
                 onClick={() => setSelectedDate(d)}
                 style={{
-                  height: cellBase,
+                  // width-driven square cell
+                  aspectRatio: '1 / 1',
+                  width: '100%',
                   borderRadius: 10,
                   border: '1px solid #e5e5e5',
                   background: sel ? '#000' : '#fff',
@@ -387,6 +397,8 @@ export default function App() {
                   display: 'grid',
                   placeItems: 'center',
                   fontWeight: sel ? 800 : 600,
+                  fontSize: isMobile ? 14 : 16,
+                  boxSizing: 'border-box',
                 }}
                 title={movementForDate(d).name}
               >
@@ -396,12 +408,12 @@ export default function App() {
           })}
         </div>
 
-        {/* Inline selected-day input — sits right under calendar (mobile + desktop) */}
+        {/* Inline selected-day input — right under the calendar */}
         <div style={{
           marginTop: isMobile ? 8 : 12,
           background:'#fff',
           borderRadius:12,
-          padding: isMobile ? 10 : 12,
+          padding: isMobile ? 8 : 12,
           boxShadow:'0 1px 2px rgba(0,0,0,.06)',
           color:'#000'
         }}>
@@ -409,21 +421,33 @@ export default function App() {
             display:'grid',
             gridTemplateColumns: isMobile ? '1fr' : '1fr auto',
             alignItems:'center',
-            gap: isMobile ? 10 : 8
+            gap: isMobile ? 8 : 10
           }}>
-            <div>
+            <div style={{minWidth: 0}}>
               <div style={{fontSize:12,color:'#000'}}>Selected: {iso(selectedDate)}</div>
-              <div style={{fontWeight:700,color:'#000'}}>{movementForDate(selectedDate).name}</div>
+              <div style={{fontWeight:700,color:'#000', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+                {movementForDate(selectedDate).name}
+              </div>
               <div style={{fontSize:12,color:'#000'}}>Units: {movementForDate(selectedDate).unit}</div>
             </div>
             <div style={{display:'flex',gap:8}}>
               <input
-                type="number"
-                inputMode="decimal"
+                type="text"
+                inputMode="decimal"    // use "numeric" if you want integers only
+                pattern="[0-9]*"
+                autoCorrect="off"
+                autoCapitalize="none"
+                enterKeyHint="done"
                 placeholder={`Enter ${movementForDate(selectedDate).unit}`}
                 value={inputVal}
                 onChange={(e)=>setInputVal(e.target.value)}
-                style={{padding:10,border:'1px solid #ddd',borderRadius:10,width: isMobile ? 120 : 160}}
+                style={{
+                  padding:10,
+                  border:'1px solid #ddd',
+                  borderRadius:10,
+                  width: isMobile ? 120 : 160,
+                  boxSizing:'border-box'
+                }}
               />
               <button onClick={saveEntry} style={{padding:'10px 12px',borderRadius:10,background:'#000',color:'#fff'}}>
                 Save
@@ -469,7 +493,7 @@ export default function App() {
       <main style={{maxWidth:680, margin:'12px auto', padding:'0 12px 48px', color:'#000'}}>
         {tab === 'calendar' && (
           <section>
-            {/* Month switcher (tightened margins) */}
+            {/* Month switcher */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom: isMobile ? 6 : 8, color:'#000'}}>
               <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()-1, 1))}>◀︎</button>
               <div style={{fontWeight:700, color:'#000'}}>{monthLabel(monthDate)}</div>
@@ -706,3 +730,4 @@ function ChartCard({ title, unit, rows, data }) {
     </div>
   );
 }
+
