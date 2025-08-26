@@ -381,12 +381,13 @@ export default function App() {
 
   // Calendar grid (mobile friendly)
   function CalendarGrid() {
-    const y = monthDate.getFullYear();
-    const m = monthDate.getMonth();
-    const first = new Date(y, m, 1);
-    const start = first.getDay(); // 0 Sun
-    the const days = new Date(y, m + 1, 0).getDate();
-    const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
+  const y = monthDate.getFullYear();
+  const m = monthDate.getMonth();
+  const first = new Date(y, m, 1);
+  const start = first.getDay(); // 0 Sun
+  const days = new Date(y, m + 1, 0).getDate();  // ✅ fixed
+  const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
+
 
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
