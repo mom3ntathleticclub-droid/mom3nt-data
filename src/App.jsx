@@ -627,16 +627,41 @@ export default function App() {
                         <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
                         <ol style={{marginTop:6,display:'grid',gap:6}}>
                           {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
-                            <li key={r.id} style={{display:'flex',justifyContent:'space-between',background:'#fff',border:'1px solid #eee',borderRadius:10,padding:'8px 10px', color:'#000'}}>
-                              <span style={{fontSize:14, color:'#000'}}>{i+1}. {(r.name||'Member').split(' ')[0]}</span>
-                              <span style={{fontSize:14,fontWeight:700, color:'#000'}}>{r.value} {todaysMovement.unit}</span>
-                            </li>
+                           <li
+  key={r.id}
+  style={{
+    display: 'grid',
+    gridTemplateColumns: '1fr auto auto', // name | score | units
+    alignItems: 'center',
+    gap: 8,
+    background: '#fff',
+    border: '1px solid #eee',
+    borderRadius: 10,
+    padding: '8px 10px',
+    color: '#000',
+    whiteSpace: 'nowrap'
+  }}
+>
+  <span style={{ fontSize: 14 }}>
+    {i + 1}. {(r.name || 'Member').split(' ')[0]}
+  </span>
+  <span style={{ fontSize: 14, fontWeight: 700, textAlign: 'right' }}>
+    {r.value}
+  </span>
+  <span style={{ fontSize: 12, opacity: 0.8, marginLeft: 6 }}>
+    {todaysMovement.unit}
+  </span>
+</li>
+
                           )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
                         </ol>
                       </div>
                     ))}
                   </div>
                 </>
+
+
+
               )}
             </div>
           </section>
