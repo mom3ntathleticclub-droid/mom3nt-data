@@ -544,7 +544,7 @@ export default function App() {
             background:'transparent',color: tab==='database' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'
           }}>Database</button>
           <button onClick={()=>setTab('leaderboard')} style={{
-            background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid '#333', borderRadius:10, padding:'6px 10px'
+            background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'
           }}>Leaderboard</button>
           <button onClick={()=>setProfileOpen(true)} style={{
             background:'#111',color:'#fff',border:'1px solid #333',borderRadius:10,padding:'6px 10px'
