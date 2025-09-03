@@ -15,6 +15,27 @@ const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const range = (n) => Array.from({ length: n }, (_, i) => i);
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const formatNiceNumber = (val) => {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return '';
+  const abs = Math.abs(n);
+  if (abs >= 1000) return Math.round(n).toLocaleString();
+  if (abs >= 100) return Math.round(n).toString();
+  if (abs >= 10) return Math.round(n).toString();
+  if (abs >= 1) return n.toFixed(1).replace(/\.0$/, '');
+  return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+};
+// Preserve actual value precision for data points: truncate, do not round
+const formatExactValue = (val) => {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return '';
+  const truncated = Math.trunc(n * 100) / 100; // keep up to 2 decimals without rounding
+  const hasDecimals = Math.abs(truncated % 1) > 0;
+  const oneDecimal = Math.abs(Math.trunc(truncated * 10) / 10 - Math.trunc(truncated)) > 0;
+  const minFrac = 0;
+  const maxFrac = hasDecimals ? (oneDecimal ? 1 : 2) : 0;
+  return truncated.toLocaleString(undefined, { minimumFractionDigits: minFrac, maximumFractionDigits: maxFrac });
+};
 
 /* ========== Movements & Cycles ========== */
 // Previous block (your original 7)
@@ -806,6 +827,14 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
 }
 
 function ChartCard({ title, unit, rows, data }) {
+  const values = rows.map((r) => Number(r.value)).filter((v) => Number.isFinite(v));
+  const dataMin = values.length ? Math.min(...values) : 0;
+  const dataMax = values.length ? Math.max(...values) : 1;
+  const span = Math.max(1, dataMax - dataMin);
+  const pad = span * 0.1; // 10% padding
+  const yLower = dataMin - pad < 0 && dataMin >= 0 ? 0 : dataMin - pad;
+  const yUpper = dataMax + pad;
+
   return (
     <div style={{ marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
@@ -817,7 +846,7 @@ function ChartCard({ title, unit, rows, data }) {
           <LineChart data={data} margin={{ top:10, right:10, bottom:10, left:0 }}>
             <CartesianGrid stroke="#e5e7eb" />
             <XAxis dataKey="shortDate" tick={{ fill:'#000' }} />
-            <YAxis tick={{ fill:'#000' }} />
+            <YAxis tick={{ fill:'#000' }} domain={[() => yLower, () => yUpper]} tickFormatter={formatNiceNumber} />
             <Tooltip
               contentStyle={{ backgroundColor:'#fff', border:'1px solid #000', color:'#000' }}
               labelStyle={{ color:'#000' }}
@@ -826,7 +855,7 @@ function ChartCard({ title, unit, rows, data }) {
                 const p = payload && payload[0] && payload[0].payload;
                 return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
               }}
-              formatter={(val) => [`${val} ${unit || ''}`, 'Value']}
+              formatter={(val) => [`${formatExactValue(val)} ${unit || ''}`, 'Value']}
             />
             <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r:4 }} />
           </LineChart>
