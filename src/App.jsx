@@ -183,8 +183,6 @@ function movementForDate(d) {
   return { key: 'tbd', name: 'TBD', unit: '' };
 }
 
-<<<<<<< HEAD
-=======
 /* ---- Helper: lookup unit by movement name (for leaderboard dropdown) ---- */
 function getMovementUnitByName(movementName) {
   if (!movementName) return '';
@@ -199,7 +197,6 @@ function getMovementUnitByName(movementName) {
   return '';
 }
 
->>>>>>> a0f3049 (Leaderboard: add movement dropdown (defaults to today); keep time lower-is-better)
 /* ================= App ================= */
 export default function App() {
   // Auth
