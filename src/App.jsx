@@ -183,6 +183,20 @@ function movementForDate(d) {
   return { key: 'tbd', name: 'TBD', unit: '' };
 }
 
+/* ---- Helper: lookup unit by movement name (for leaderboard dropdown) ---- */
+function getMovementUnitByName(movementName) {
+  if (!movementName) return '';
+  for (const cy of CYCLES) {
+    for (const [, m] of Object.entries(cy.weekTemplate)) {
+      if (m?.name === movementName) return m.unit || '';
+    }
+  }
+  for (const [, m] of Object.entries(LEGACY_MOVEMENTS)) {
+    if (m?.name === movementName) return m.unit || '';
+  }
+  return '';
+}
+
 /* ================= App ================= */
 export default function App() {
   // Auth
@@ -204,6 +218,9 @@ export default function App() {
   const [inputVal, setInputVal] = useState('');
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
   const [isMobile, setIsMobile] = useState(false);
+
+  // Leaderboard movement selector
+  const [lbMovementName, setLbMovementName] = useState('');
 
   // Data
   const [entries, setEntries] = useState([]);
@@ -337,19 +354,40 @@ export default function App() {
     return entries.filter((e) => e.user_id === session.user.id);
   }, [entries, session]);
 
-  /* ---- Leaderboard (lower time = better for time-based moves) ---- */
+  /* ---- Leaderboard helpers ---- */
   const todaysMovement = movementForDate(new Date());
+
+  // Build dropdown options for current week's 7 movements
+  const leaderboardOptions = useMemo(() => {
+    const idx = getCurrentCycleIndex(new Date());
+    const currentCycle = idx >= 0 ? CYCLES[idx] : CYCLES[CYCLES.length - 1];
+    if (!currentCycle) return [];
+    return WEEKDAY_ORDER
+      .map(wd => currentCycle.weekTemplate[wd])
+      .filter(Boolean)
+      .map(m => ({ name: m.name, unit: m.unit || '' }));
+  }, []);
+
+  // Default the dropdown to today's movement (or first option)
+  useEffect(() => {
+    const todayName = (todaysMovement && todaysMovement.name !== 'TBD') ? todaysMovement.name : (leaderboardOptions[0]?.name || '');
+    setLbMovementName(prev => prev || todayName);
+  }, [todaysMovement, leaderboardOptions]);
+
+  /* ---- Leaderboard (uses selected movement; lower time = better for time events) ---- */
   const leaderboard = useMemo(() => {
-    if (todaysMovement.name === 'TBD') return { male: [], female: [] };
+    if (!lbMovementName) return { male: [], female: [], unit: '' };
+
+    const movementUnit = getMovementUnitByName(lbMovementName);
 
     // Lower-is-better if unit is 'time' OR explicitly listed here.
     const LOWER_BETTER_MOVES = new Set(['.1 Distance Run']);
-    const lowerIsBetter =
-      todaysMovement.unit === 'time' || LOWER_BETTER_MOVES.has(todaysMovement.name);
+    const lowerIsBetter = movementUnit === 'time' || LOWER_BETTER_MOVES.has(lbMovementName);
 
+    // All-time bests for the selected movement
     const rows = entries.filter(
       (e) =>
-        e.movement === todaysMovement.name &&
+        e.movement === lbMovementName &&
         (e.gender === 'male' || e.gender === 'female')
     );
 
@@ -370,8 +408,8 @@ export default function App() {
       : (a, b) => Number(b.value) - Number(a.value);  // descending
 
     const top5 = (m) => Array.from(m.values()).sort(sortFn).slice(0, 5);
-    return { male: top5(bestMale), female: top5(bestFemale) };
-  }, [entries, todaysMovement.name, todaysMovement.unit]);
+    return { male: top5(bestMale), female: top5(bestFemale), unit: movementUnit };
+  }, [entries, lbMovementName]);
 
   /* ---------- LOGIN UI ---------- */
   if (!session) {
@@ -501,53 +539,72 @@ export default function App() {
         {tab === 'leaderboard' && (
           <section>
             <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              {todaysMovement.name === 'TBD' ? (
-                <div style={{fontSize:14}}>No leaderboard today (TBD).</div>
-              ) : (
-                <>
-                  <div style={{fontSize:12,color:'#000'}}>Today’s movement</div>
-                  <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>
-                    {todaysMovement.name} <span style={{fontSize:12,color:'#000'}}>({todaysMovement.unit})</span>
-                  </div>
 
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                    {['male','female'].map((g) => (
-                      <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
-                        <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
-                        <ol style={{marginTop:6,display:'grid',gap:6}}>
-                          {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
-                            <li
-                              key={r.id}
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: '1fr auto auto', // name | score | units
-                                alignItems: 'center',
-                                gap: 8,
-                                background: '#fff',
-                                border: '1px solid #eee',
-                                borderRadius: 10,
-                                padding: '8px 10px',
-                                color: '#000',
-                                whiteSpace: 'nowrap'
-                              }}
-                            >
-                              <span style={{ fontSize: 14 }}>
-                                {i + 1}. {(r.name || 'Member').split(' ')[0]}
-                              </span>
-                              <span style={{ fontSize: 14, fontWeight: 700, textAlign: 'right' }}>
-                                {r.value}
-                              </span>
-                              <span style={{ fontSize: 12, opacity: 0.8, marginLeft: 6 }}>
-                                {todaysMovement.unit}
-                              </span>
-                            </li>
-                          )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
-                        </ol>
-                      </div>
-                    ))}
+              {/* Movement selector */}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center', marginBottom:8 }}>
+                <div style={{ fontWeight:700 }}>Leaderboard</div>
+                <span style={{ fontSize:12, opacity:.8 }}>Movement:</span>
+                <select
+                  value={lbMovementName}
+                  onChange={(e)=>setLbMovementName(e.target.value)}
+                  style={{ padding:'6px 8px', border:'1px solid #ddd', borderRadius:8 }}
+                >
+                  {/* If current selection isn't in the week's list, still show it */}
+                  {lbMovementName && !leaderboardOptions.find(o => o.name === lbMovementName) && (
+                    <option value={lbMovementName}>{lbMovementName}</option>
+                  )}
+                  {leaderboardOptions.map(opt => (
+                    <option key={opt.name} value={opt.name}>{opt.name}</option>
+                  ))}
+                </select>
+                {leaderboard.unit && (
+                  <span style={{ fontSize:12, opacity:.7 }}>
+                    &nbsp;• Units: {leaderboard.unit}
+                  </span>
+                )}
+              </div>
+
+              <div style={{fontSize:12,color:'#000'}}>Selected movement</div>
+              <div style={{fontWeight:700,marginBottom:8,color:'#000'}}>
+                {lbMovementName || '—'} {leaderboard.unit ? <span style={{fontSize:12}}>({leaderboard.unit})</span> : null}
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                {['male','female'].map((g) => (
+                  <div key={g} style={{background:'#f6f7f9',border:'1px solid #eee',borderRadius:12,padding:10, color:'#000'}}>
+                    <div style={{fontWeight:700,textTransform:'capitalize', color:'#000'}}>Top 5 {g}</div>
+                    <ol style={{marginTop:6,display:'grid',gap:6}}>
+                      {leaderboard[g].length ? leaderboard[g].map((r,i)=>(
+                        <li
+                          key={r.id}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr auto auto', // name | score | units
+                            alignItems: 'center',
+                            gap: 8,
+                            background: '#fff',
+                            border: '1px solid #eee',
+                            borderRadius: 10,
+                            padding: '8px 10px',
+                            color: '#000',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <span style={{ fontSize: 14 }}>
+                            {i + 1}. {(r.name || 'Member').split(' ')[0]}
+                          </span>
+                          <span style={{ fontSize: 14, fontWeight: 700, textAlign: 'right' }}>
+                            {r.value}
+                          </span>
+                          <span style={{ fontSize: 12, opacity: 0.8, marginLeft: 6 }}>
+                            {leaderboard.unit || ''}
+                          </span>
+                        </li>
+                      )) : <div style={{fontSize:12,color:'#000'}}>No entries yet.</div>}
+                    </ol>
                   </div>
-                </>
-              )}
+                ))}
+              </div>
             </div>
           </section>
         )}
@@ -864,3 +921,4 @@ function ChartCard({ title, unit, rows, data }) {
     </div>
   );
 }
+
