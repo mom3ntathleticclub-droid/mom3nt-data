@@ -15,6 +15,27 @@ const dayName = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const range = (n) => Array.from({ length: n }, (_, i) => i);
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const formatNiceNumber = (val) => {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return '';
+  const abs = Math.abs(n);
+  if (abs >= 1000) return Math.round(n).toLocaleString();
+  if (abs >= 100) return Math.round(n).toString();
+  if (abs >= 10) return Math.round(n).toString();
+  if (abs >= 1) return n.toFixed(1).replace(/\.0$/, '');
+  return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+};
+// Preserve actual value precision for data points: truncate, do not round
+const formatExactValue = (val) => {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return '';
+  const truncated = Math.trunc(n * 100) / 100; // keep up to 2 decimals without rounding
+  const hasDecimals = Math.abs(truncated % 1) > 0;
+  const oneDecimal = Math.abs(Math.trunc(truncated * 10) / 10 - Math.trunc(truncated)) > 0;
+  const minFrac = 0;
+  const maxFrac = hasDecimals ? (oneDecimal ? 1 : 2) : 0;
+  return truncated.toLocaleString(undefined, { minimumFractionDigits: minFrac, maximumFractionDigits: maxFrac });
+};
 
 /* ========== Movements & Cycles ========== */
 // Previous block (your original 7)
@@ -112,7 +133,7 @@ function NumberField({ value, onChange, placeholder, width = 160, allowDecimal =
     if (document.activeElement !== el) {
       el.focus({ preventScroll: true });
       const len = el.value.length;
-      try { el.setSelectionRange(len, len); } catch {}
+      try { el.setSelectionRange(len, len); } catch { /* intentionally ignore selection errors */ }
     }
   }, [value, editing]);
 
@@ -150,6 +171,16 @@ function NumberField({ value, onChange, placeholder, width = 160, allowDecimal =
       }}
     />
   );
+}
+
+/* ---- Movement for a date ---- */
+function movementForDate(d) {
+  const cycle = getCycleForDate(d);
+  if (cycle) {
+    const mov = cycle.weekTemplate[dayName(d)];
+    if (mov) return mov;
+  }
+  return { key: 'tbd', name: 'TBD', unit: '' };
 }
 
 /* ================= App ================= */
@@ -265,16 +296,6 @@ export default function App() {
     setProfileOpen(false);
   }
 
-  /* ---- Movement for a date ---- */
-  function movementForDate(d) {
-    const cycle = getCycleForDate(d);
-    if (cycle) {
-      const mov = cycle.weekTemplate[dayName(d)];
-      if (mov) return mov;
-    }
-    return { key: 'tbd', name: 'TBD', unit: '' };
-  }
-
   /* ---- Save entry (UPSERT on user_id+date) ---- */
   async function saveEntry() {
     if (!session) return alert('Please sign in first (use code).');
@@ -288,6 +309,9 @@ export default function App() {
 
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
+
+    // Clear input immediately after a valid click
+    setInputVal('');
 
     const row = {
       user_id: session.user.id,
@@ -303,7 +327,6 @@ export default function App() {
       .from('entries')
       .upsert(row, { onConflict: ['user_id', 'date'] }); // matches entries_unique_user_date
     if (error) return alert(error.message);
-    setInputVal('');
 
     const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
     setEntries(data || []);
@@ -414,119 +437,6 @@ export default function App() {
   }
 
   /* ---------- Calendar (fits mobile width) ---------- */
-  function CalendarGrid() {
-    const y = monthDate.getFullYear();
-    const m = monthDate.getMonth();
-    const first = new Date(y, m, 1);
-    const start = first.getDay(); // 0 Sun
-    const days = new Date(y, m + 1, 0).getDate();
-    const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
-
-    const gap = isMobile ? 2 : 6;
-    const mov = movementForDate(selectedDate);
-    const isTBD = mov.name === 'TBD';
-
-    return (
-      <>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-            gap,
-            width: '100%',
-            boxSizing: 'border-box',
-          }}
-        >
-          {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
-            <div key={d} style={{ fontSize: isMobile ? 10 : 12, color:'#666', textAlign:'center', paddingBottom: isMobile ? 2 : 4 }}>
-              {d}
-            </div>
-          ))}
-          {cells.map((d,i) => {
-            if (!d) return <div key={`sp-${i}`} />;
-            const sel = isoLocal(d) === isoLocal(selectedDate);
-            const today = isoLocal(d) === isoLocal(new Date());
-            return (
-              <button
-                key={d.toISOString()}
-                onClick={() => setSelectedDate(d)}
-                style={{
-                  aspectRatio: '1 / 1',
-                  width: '100%',
-                  borderRadius: 10,
-                  border: '1px solid #e5e5e5',
-                  background: sel ? '#000' : '#fff',
-                  color: sel ? '#fff' : '#111',
-                  outline: today ? '2px solid #dca636' : 'none',
-                  display: 'grid',
-                  placeItems: 'center',
-                  fontWeight: sel ? 800 : 600,
-                  fontSize: isMobile ? 14 : 16,
-                  boxSizing: 'border-box',
-                }}
-                title={movementForDate(d).name}
-              >
-                {d.getDate()}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Inline selected-day input */}
-        <div style={{
-          marginTop: isMobile ? 8 : 12,
-          background:'#fff',
-          borderRadius:12,
-          padding: isMobile ? 8 : 12,
-          boxShadow:'0 1px 2px rgba(0,0,0,.06)',
-          color:'#000'
-        }}>
-          <div style={{
-            display:'grid',
-            gridTemplateColumns: isMobile ? '1fr' : '1fr auto',
-            alignItems:'center',
-            gap: isMobile ? 8 : 10
-          }}>
-            <div style={{minWidth: 0}}>
-              <div style={{fontSize:12,color:'#000'}}>Selected: {isoLocal(selectedDate)}</div>
-              <div style={{fontWeight:700,color:'#000', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                {mov.name}
-              </div>
-              <div style={{fontSize:12,color:'#000'}}>Units: {mov.unit || '—'}</div>
-              {isTBD && (
-                <div style={{fontSize:12,color:'#b45309', marginTop:4}}>
-                  TBD day — entries disabled outside the defined cycles.
-                </div>
-              )}
-            </div>
-            <div style={{display:'flex',gap:8}}>
-              <NumberField
-                value={inputVal}
-                onChange={setInputVal}
-                placeholder={isTBD ? 'Unavailable' : `Enter ${mov.unit}`}
-                width={isMobile ? 120 : 160}
-                allowDecimal={true}
-              />
-              <button
-                onClick={saveEntry}
-                disabled={isTBD}
-                style={{
-                  padding:'10px 12px',
-                  borderRadius:10,
-                  background: isTBD ? '#aaa' : '#000',
-                  color:'#fff',
-                  opacity: isTBD ? 0.7 : 1,
-                  cursor: isTBD ? 'not-allowed' : 'pointer'
-                }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
 
   /* ---------- Main UI ---------- */
   return (
@@ -569,7 +479,15 @@ export default function App() {
             </div>
 
             <div style={{background:'#fff',borderRadius:12,padding: isMobile ? 8 : 12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
-              <CalendarGrid />
+              <CalendarGrid
+                monthDate={monthDate}
+                isMobile={isMobile}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                inputVal={inputVal}
+                setInputVal={setInputVal}
+                saveEntry={saveEntry}
+              />
             </div>
           </section>
         )}
@@ -673,6 +591,120 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ================= CalendarGrid (top-level, stable identity) ================= */
+function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, saveEntry }) {
+  const y = monthDate.getFullYear();
+  const m = monthDate.getMonth();
+  const first = new Date(y, m, 1);
+  const start = first.getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
+
+  const gap = isMobile ? 2 : 6;
+  const mov = movementForDate(selectedDate);
+  const isTBD = mov.name === 'TBD';
+
+  return (
+    <>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+          gap,
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => (
+          <div key={d} style={{ fontSize: isMobile ? 10 : 12, color:'#666', textAlign:'center', paddingBottom: isMobile ? 2 : 4 }}>
+            {d}
+          </div>
+        ))}
+        {cells.map((d,i) => {
+          if (!d) return <div key={`sp-${i}`} />;
+          const sel = isoLocal(d) === isoLocal(selectedDate);
+          const today = isoLocal(d) === isoLocal(new Date());
+          return (
+            <button
+              key={d.toISOString()}
+              onClick={() => setSelectedDate(d)}
+              style={{
+                aspectRatio: '1 / 1',
+                width: '100%',
+                borderRadius: 10,
+                border: '1px solid #e5e5e5',
+                background: sel ? '#000' : '#fff',
+                color: sel ? '#fff' : '#111',
+                outline: today ? '2px solid #dca636' : 'none',
+                display: 'grid',
+                placeItems: 'center',
+                fontWeight: sel ? 800 : 600,
+                fontSize: isMobile ? 14 : 16,
+                boxSizing: 'border-box',
+              }}
+              title={movementForDate(d).name}
+            >
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{
+        marginTop: isMobile ? 8 : 12,
+        background:'#fff',
+        borderRadius:12,
+        padding: isMobile ? 8 : 12,
+        boxShadow:'0 1px 2px rgba(0,0,0,.06)',
+        color:'#000'
+      }}>
+        <div style={{
+          display:'grid',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr auto',
+          alignItems:'center',
+          gap: isMobile ? 8 : 10
+        }}>
+          <div style={{minWidth: 0}}>
+            <div style={{fontSize:12,color:'#000'}}>Selected: {isoLocal(selectedDate)}</div>
+            <div style={{fontWeight:700,color:'#000', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+              {mov.name}
+            </div>
+            <div style={{fontSize:12,color:'#000'}}>Units: {mov.unit || '—'}</div>
+            {isTBD && (
+              <div style={{fontSize:12,color:'#b45309', marginTop:4}}>
+                TBD day — entries disabled outside the defined cycles.
+              </div>
+            )}
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <NumberField
+              value={inputVal}
+              onChange={setInputVal}
+              placeholder={isTBD ? 'Unavailable' : `Enter ${mov.unit}`}
+              width={isMobile ? 120 : 160}
+              allowDecimal={true}
+            />
+            <button
+              onClick={saveEntry}
+              disabled={isTBD}
+              style={{
+                padding:'10px 12px',
+                borderRadius:10,
+                background: isTBD ? '#aaa' : '#000',
+                color:'#fff',
+                opacity: isTBD ? 0.7 : 1,
+                cursor: isTBD ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -795,6 +827,14 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
 }
 
 function ChartCard({ title, unit, rows, data }) {
+  const values = rows.map((r) => Number(r.value)).filter((v) => Number.isFinite(v));
+  const dataMin = values.length ? Math.min(...values) : 0;
+  const dataMax = values.length ? Math.max(...values) : 1;
+  const span = Math.max(1, dataMax - dataMin);
+  const pad = span * 0.1; // 10% padding
+  const yLower = dataMin - pad < 0 && dataMin >= 0 ? 0 : dataMin - pad;
+  const yUpper = dataMax + pad;
+
   return (
     <div style={{ marginBottom:12, background:'#fff', borderRadius:12, padding:12, boxShadow:'0 1px 2px rgba(0,0,0,.06)' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
@@ -806,7 +846,7 @@ function ChartCard({ title, unit, rows, data }) {
           <LineChart data={data} margin={{ top:10, right:10, bottom:10, left:0 }}>
             <CartesianGrid stroke="#e5e7eb" />
             <XAxis dataKey="shortDate" tick={{ fill:'#000' }} />
-            <YAxis tick={{ fill:'#000' }} />
+            <YAxis tick={{ fill:'#000' }} domain={[() => yLower, () => yUpper]} tickFormatter={formatNiceNumber} />
             <Tooltip
               contentStyle={{ backgroundColor:'#fff', border:'1px solid #000', color:'#000' }}
               labelStyle={{ color:'#000' }}
@@ -815,7 +855,7 @@ function ChartCard({ title, unit, rows, data }) {
                 const p = payload && payload[0] && payload[0].payload;
                 return p?.date ? `Date: ${p.date}` : `Date: ${label}`;
               }}
-              formatter={(val) => [`${val} ${unit || ''}`, 'Value']}
+              formatter={(val) => [`${formatExactValue(val)} ${unit || ''}`, 'Value']}
             />
             <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={3} dot={{ r:4 }} />
           </LineChart>
