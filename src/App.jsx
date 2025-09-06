@@ -29,7 +29,7 @@ const formatNiceNumber = (val) => {
 const formatExactValue = (val) => {
   const n = Number(val);
   if (!Number.isFinite(n)) return '';
-  const truncated = Math.trunc(n * 100) / 100; // keep up to 2 decimals without rounding
+  const truncated = Math.trunc(n * 100) / 100;
   const hasDecimals = Math.abs(truncated % 1) > 0;
   const oneDecimal = Math.abs(Math.trunc(truncated * 10) / 10 - Math.trunc(truncated)) > 0;
   const minFrac = 0;
@@ -38,7 +38,6 @@ const formatExactValue = (val) => {
 };
 
 /* ========== Movements & Cycles ========== */
-// Previous block (your original 7)
 const LEGACY_MOVEMENTS = {
   Sunday:    { key: 'sun', name: '3 Rep Max Landmine clean', unit: 'lbs' },
   Monday:    { key: 'mon', name: '6 Rep Reverse Lunge Max', unit: 'lbs' },
@@ -63,11 +62,10 @@ const SEPT_WEEK_TEMPLATE = {
 };
 
 // Previous 8-week cycle window (explicit)
-const PREV_CYCLE_START = new Date('2025-07-06'); // Sunday
-const PREV_CYCLE_END   = new Date('2025-08-31'); // Sunday
+const PREV_CYCLE_START = new Date('2025-07-06');
+const PREV_CYCLE_END   = new Date('2025-08-31');
 const PREV_WEEK_TEMPLATE = { ...LEGACY_MOVEMENTS };
 
-// Cycles list (Prev, Current)
 const CYCLES = [
   { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE },
   { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS, weekTemplate: SEPT_WEEK_TEMPLATE },
@@ -133,7 +131,7 @@ function NumberField({ value, onChange, placeholder, width = 160, allowDecimal =
     if (document.activeElement !== el) {
       el.focus({ preventScroll: true });
       const len = el.value.length;
-      try { el.setSelectionRange(len, len); } catch { /* intentionally ignore selection errors */ }
+      try { el.setSelectionRange(len, len); } catch {}
     }
   }, [value, editing]);
 
@@ -216,10 +214,11 @@ export default function App() {
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
+  const [inputNotes, setInputNotes] = useState(''); // NEW: notes
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
   const [isMobile, setIsMobile] = useState(false);
 
-  // Leaderboard movement selector (SINGLE declaration)
+  // Leaderboard dropdown
   const [lbMovementName, setLbMovementName] = useState('');
 
   // Data
@@ -256,7 +255,7 @@ export default function App() {
     return () => { if (sub) sub.unsubscribe(); };
   }, []);
 
-  // Load entries and profile
+  // Load entries & profile
   useEffect(() => {
     if (!session) return;
     (async () => {
@@ -298,7 +297,34 @@ export default function App() {
     };
   }, []);
 
-  /* ---- Profile save ---- */
+  /* ---- Prefill value/notes when selecting a day (carry forward notes for same movement) ---- */
+useEffect(() => {
+  if (!session) return;
+
+  const targetISO = isoLocal(selectedDate);
+  const mine = entries.filter(e => e.user_id === session.user.id);
+
+  // If there’s already an entry for the selected date, use it.
+  const existing = mine.find(e => e.date === targetISO);
+  if (existing) {
+    setInputVal(existing.value != null ? String(existing.value) : '');
+    setInputNotes(existing.notes || '');
+    return;
+  }
+
+  // Otherwise, carry forward notes from the most recent prior entry for the same movement.
+  const mov = movementForDate(selectedDate);
+  const priorForMovement = mine
+    .filter(e => e.movement === mov.name && e.date < targetISO)
+    .sort((a, b) => a.date.localeCompare(b.date)) // ISO strings sort correctly
+    .pop();
+
+  setInputVal('');
+  setInputNotes(priorForMovement?.notes || '');
+}, [selectedDate, session, entries]);
+
+
+  /* ---- Save profile ---- */
   async function saveProfile() {
     if (!session) return;
     const trimmed = (name || '').trim();
@@ -327,22 +353,26 @@ export default function App() {
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
 
-    // Clear input immediately after a valid click
+    const notes = (inputNotes || '').trim();
+
+    // Clear inputs after save click (keeps UI snappy)
     setInputVal('');
+    setInputNotes('');
 
     const row = {
       user_id: session.user.id,
-      date: isoLocal(selectedDate), // LOCAL date string to avoid UTC drift
+      date: isoLocal(selectedDate),
       movement: mov.name,
       value: v,
       unit: mov.unit,
       name: name.trim(),
       gender,
+      notes: notes || null, // NEW
     };
 
     const { error } = await supabase
       .from('entries')
-      .upsert(row, { onConflict: ['user_id', 'date'] }); // matches entries_unique_user_date
+      .upsert(row, { onConflict: ['user_id', 'date'] }); // unique on (user_id,date)
     if (error) return alert(error.message);
 
     const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
@@ -354,10 +384,9 @@ export default function App() {
     return entries.filter((e) => e.user_id === session.user.id);
   }, [entries, session]);
 
-  /* ---- Leaderboard helpers ---- */
+  /* ---- Leaderboard ---- */
   const todaysMovement = movementForDate(new Date());
 
-  // Build dropdown options for current week's 7 movements
   const leaderboardOptions = useMemo(() => {
     const idx = getCurrentCycleIndex(new Date());
     const currentCycle = idx >= 0 ? CYCLES[idx] : CYCLES[CYCLES.length - 1];
@@ -368,7 +397,6 @@ export default function App() {
       .map(m => ({ name: m.name, unit: m.unit || '' }));
   }, []);
 
-  // Default the dropdown to today's movement (or first option)
   useEffect(() => {
     const todayName =
       (todaysMovement && todaysMovement.name !== 'TBD')
@@ -377,23 +405,16 @@ export default function App() {
     setLbMovementName(prev => prev || todayName);
   }, [todaysMovement, leaderboardOptions]);
 
-  /* ---- Leaderboard (uses selected movement; lower time = better for time events) ---- */
   const leaderboard = useMemo(() => {
     if (!lbMovementName) return { male: [], female: [], unit: '' };
-
     const movementUnit = getMovementUnitByName(lbMovementName);
-
-    // Lower-is-better if unit is 'time' OR explicitly listed here.
     const LOWER_BETTER_MOVES = new Set(['.1 Distance Run']);
     const lowerIsBetter = movementUnit === 'time' || LOWER_BETTER_MOVES.has(lbMovementName);
-
-    // All-time bests for the selected movement
     const rows = entries.filter(
       (e) =>
         e.movement === lbMovementName &&
         (e.gender === 'male' || e.gender === 'female')
     );
-
     const bestMale = new Map();
     const bestFemale = new Map();
     const isBetter = (newVal, prevVal) =>
@@ -407,8 +428,8 @@ export default function App() {
     }
 
     const sortFn = lowerIsBetter
-      ? (a, b) => Number(a.value) - Number(b.value)   // ascending (faster/better)
-      : (a, b) => Number(b.value) - Number(a.value);  // descending
+      ? (a, b) => Number(a.value) - Number(b.value)
+      : (a, b) => Number(b.value) - Number(a.value);
 
     const top5 = (m) => Array.from(m.values()).sort(sortFn).slice(0, 5);
     return { male: top5(bestMale), female: top5(bestFemale), unit: movementUnit };
@@ -477,8 +498,6 @@ export default function App() {
     );
   }
 
-  /* ---------- Calendar (fits mobile width) ---------- */
-
   /* ---------- Main UI ---------- */
   return (
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Arial', background:'#f6f7f9', minHeight:'100vh'}}>
@@ -488,18 +507,10 @@ export default function App() {
       }}>
         <strong style={{whiteSpace:'nowrap'}}>MOM3NT DATA</strong>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center'}}>
-          <button onClick={()=>setTab('calendar')} style={{
-            background:'transparent',color: tab==='calendar' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'
-          }}>Calendar</button>
-          <button onClick={()=>setTab('database')} style={{
-            background:'transparent',color: tab==='database' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'
-          }}>Database</button>
-          <button onClick={()=>setTab('leaderboard')} style={{
-            background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'
-          }}>Leaderboard</button>
-          <button onClick={()=>setProfileOpen(true)} style={{
-            background:'#111',color:'#fff',border:'1px solid #333',borderRadius:10,padding:'6px 10px'
-          }}>Profile</button>
+          <button onClick={()=>setTab('calendar')} style={{background:'transparent',color: tab==='calendar' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Calendar</button>
+          <button onClick={()=>setTab('database')} style={{background:'transparent',color: tab==='database' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Database</button>
+          <button onClick={()=>setTab('leaderboard')} style={{background:'transparent',color: tab==='leaderboard' ? '#dca636' : '#fff', border:'1px solid #333', borderRadius:10, padding:'6px 10px'}}>Leaderboard</button>
+          <button onClick={()=>setProfileOpen(true)} style={{background:'#111',color:'#fff',border:'1px solid #333',borderRadius:10,padding:'6px 10px'}}>Profile</button>
           <button
             onClick={async ()=>{ await supabase.auth.signOut(); setSession(null); }}
             style={{background:'#dca636',color:'#000',border:'1px solid #333',borderRadius:10,padding:'6px 10px',fontWeight:700}}
@@ -512,7 +523,6 @@ export default function App() {
       <main style={{maxWidth:680, margin:'12px auto', padding:'0 12px 48px', color:'#000'}}>
         {tab === 'calendar' && (
           <section>
-            {/* Month switcher */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom: isMobile ? 6 : 8, color:'#000'}}>
               <button onClick={()=>setMonthDate(new Date(monthDate.getFullYear(), monthDate.getMonth()-1, 1))}>◀︎</button>
               <div style={{fontWeight:700, color:'#000'}}>{monthLabel(monthDate)}</div>
@@ -527,6 +537,8 @@ export default function App() {
                 setSelectedDate={setSelectedDate}
                 inputVal={inputVal}
                 setInputVal={setInputVal}
+                inputNotes={inputNotes}
+                setInputNotes={setInputNotes}
                 saveEntry={saveEntry}
               />
             </div>
@@ -543,7 +555,6 @@ export default function App() {
           <section>
             <div style={{background:'#fff',borderRadius:12,padding:12,boxShadow:'0 1px 2px rgba(0,0,0,.06)', color:'#000'}}>
 
-              {/* Movement selector */}
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center', marginBottom:8 }}>
                 <div style={{ fontWeight:700 }}>Leaderboard</div>
                 <span style={{ fontSize:12, opacity:.8 }}>Movement:</span>
@@ -552,7 +563,6 @@ export default function App() {
                   onChange={(e)=>setLbMovementName(e.target.value)}
                   style={{ padding:'6px 8px', border:'1px solid #ddd', borderRadius:8 }}
                 >
-                  {/* If current selection isn't in the week's list, still show it */}
                   {lbMovementName && !leaderboardOptions.find(o => o.name === lbMovementName) && (
                     <option value={lbMovementName}>{lbMovementName}</option>
                   )}
@@ -582,7 +592,7 @@ export default function App() {
                           key={r.id}
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: '1fr auto auto', // name | score | units
+                            gridTemplateColumns: '1fr auto auto',
                             alignItems: 'center',
                             gap: 8,
                             background: '#fff',
@@ -654,12 +664,12 @@ export default function App() {
   );
 }
 
-/* ================= CalendarGrid (top-level, stable identity) ================= */
-function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, saveEntry }) {
+/* ================= CalendarGrid ================= */
+function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, inputNotes, setInputNotes, saveEntry }) {
   const y = monthDate.getFullYear();
   const m = monthDate.getMonth();
   const first = new Date(y, m, 1);
-  const days = new Date(y, m + 1, 0).getDate();   // <-- fixed
+  const days = new Date(y, m + 1, 0).getDate();
   const start = first.getDay();
   const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
@@ -723,9 +733,9 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
       }}>
         <div style={{
           display:'grid',
-          gridTemplateColumns: isMobile ? '1fr' : '1fr auto',
+          gridTemplateColumns: '1fr',
           alignItems:'center',
-          gap: isMobile ? 8 : 10
+          gap: 8
         }}>
           <div style={{minWidth: 0}}>
             <div style={{fontSize:12,color:'#000'}}>Selected: {isoLocal(selectedDate)}</div>
@@ -739,7 +749,9 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
               </div>
             )}
           </div>
-          <div style={{display:'flex',gap:8}}>
+
+          {/* Inputs */}
+          <div style={{display:'flex',gap:8,flexWrap:'wrap', alignItems:'center'}}>
             <NumberField
               value={inputVal}
               onChange={setInputVal}
@@ -761,6 +773,27 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
             >
               Save
             </button>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label style={{ fontSize:12, display:'block', marginBottom:4, color:'#000' }}>Notes (optional)</label>
+            <textarea
+              value={inputNotes}
+              onChange={(e)=>setInputNotes(e.target.value)}
+              placeholder={isTBD ? 'Unavailable' : 'Add any context or notes…'}
+              disabled={isTBD}
+              rows={3}
+              style={{
+                width:'100%',
+                padding:8,
+                border:'1px solid #ddd',
+                borderRadius:10,
+                resize:'vertical',
+                background: isTBD ? '#f5f5f5' : '#fff',
+                color:'#000'
+              }}
+            />
           </div>
         </div>
       </div>
@@ -852,7 +885,7 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         </>
       )}
 
-      {/* All-time across all configured movements (no TBD) */}
+      {/* All-time across all configured movements */}
       {dbView === 'all' && (
         <>
           {(() => {
@@ -891,7 +924,7 @@ function ChartCard({ title, unit, rows, data }) {
   const dataMin = values.length ? Math.min(...values) : 0;
   const dataMax = values.length ? Math.max(...values) : 1;
   const span = Math.max(1, dataMax - dataMin);
-  const pad = span * 0.1; // 10% padding
+  const pad = span * 0.1;
   const yLower = dataMin - pad < 0 && dataMin >= 0 ? 0 : dataMin - pad;
   const yUpper = dataMax + pad;
 
