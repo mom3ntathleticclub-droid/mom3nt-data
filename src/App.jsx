@@ -216,6 +216,7 @@ export default function App() {
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
+  const [notesVal, setNotesVal] = useState(''); // NEW: notes text for the movement
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
   const [isMobile, setIsMobile] = useState(false);
 
@@ -298,6 +299,22 @@ export default function App() {
     };
   }, []);
 
+  /* ---- Prefill Notes when date/movement changes ---- */
+  const myEntries = useMemo(() => {
+    if (!session) return [];
+    return entries.filter((e) => e.user_id === session.user.id);
+  }, [entries, session]);
+
+  useEffect(() => {
+    const mov = movementForDate(selectedDate);
+    if (mov.name === 'TBD') { setNotesVal(''); return; }
+    // find latest non-empty note for this movement
+    const last = myEntries
+      .filter(e => e.movement === mov.name && e.notes && String(e.notes).trim())
+      .sort((a,b) => b.date.localeCompare(a.date))[0];
+    setNotesVal(last ? String(last.notes) : '');
+  }, [selectedDate, myEntries]);
+
   /* ---- Profile save ---- */
   async function saveProfile() {
     if (!session) return;
@@ -327,7 +344,7 @@ export default function App() {
     const v = parseFloat(inputVal);
     if (!v || v <= 0) return alert('Enter a positive number.');
 
-    // Clear input immediately after a valid click
+    // Clear input immediately after a valid click (notes stay)
     setInputVal('');
 
     const row = {
@@ -338,6 +355,7 @@ export default function App() {
       unit: mov.unit,
       name: name.trim(),
       gender,
+      notes: (notesVal || '').trim() || null, // NEW
     };
 
     const { error } = await supabase
@@ -348,11 +366,6 @@ export default function App() {
     const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
     setEntries(data || []);
   }
-
-  const myEntries = useMemo(() => {
-    if (!session) return [];
-    return entries.filter((e) => e.user_id === session.user.id);
-  }, [entries, session]);
 
   /* ---- Leaderboard helpers ---- */
   const todaysMovement = movementForDate(new Date());
@@ -369,6 +382,7 @@ export default function App() {
   }, []);
 
   // Default the dropdown to today's movement (or first option)
+  const [lbMovementName, setLbMovementName] = useState('');
   useEffect(() => {
     const todayName = (todaysMovement && todaysMovement.name !== 'TBD') ? todaysMovement.name : (leaderboardOptions[0]?.name || '');
     setLbMovementName(prev => prev || todayName);
@@ -524,6 +538,8 @@ export default function App() {
                 setSelectedDate={setSelectedDate}
                 inputVal={inputVal}
                 setInputVal={setInputVal}
+                notesVal={notesVal}             // NEW
+                setNotesVal={setNotesVal}       // NEW
                 saveEntry={saveEntry}
               />
             </div>
@@ -652,7 +668,7 @@ export default function App() {
 }
 
 /* ================= CalendarGrid (top-level, stable identity) ================= */
-function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, saveEntry }) {
+function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, notesVal, setNotesVal, saveEntry }) {
   const y = monthDate.getFullYear();
   const m = monthDate.getMonth();
   const first = new Date(y, m, 1);
@@ -736,7 +752,7 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
               </div>
             )}
           </div>
-          <div style={{display:'flex',gap:8}}>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
             <NumberField
               value={inputVal}
               onChange={setInputVal}
@@ -758,6 +774,31 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
             >
               Save
             </button>
+          </div>
+        </div>
+
+        {/* Notes field */}
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 12, marginBottom: 4, color: '#000' }}>Notes (for this movement):</div>
+          <textarea
+            placeholder="Eg. try narrower stance next time / pacing felt good / use 35s next week…"
+            value={notesVal}
+            onChange={(e)=>setNotesVal(e.target.value)}
+            rows={isMobile ? 3 : 3}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: 10,
+              borderRadius: 10,
+              border: '1px solid #ddd',
+              resize: 'vertical',
+              minHeight: 64,
+              background: '#fff',
+              color: '#000'
+            }}
+          />
+          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4, color:'#000' }}>
+            Tip: your latest note for this movement will auto-load each time it comes back in the cycle.
           </div>
         </div>
       </div>
@@ -921,4 +962,3 @@ function ChartCard({ title, unit, rows, data }) {
     </div>
   );
 }
-
