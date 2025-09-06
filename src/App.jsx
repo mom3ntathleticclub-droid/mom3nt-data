@@ -659,7 +659,7 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
   const y = monthDate.getFullYear();
   const m = monthDate.getMonth();
   const first = new Date(y, m, 1);
-  the const days = new Date(y, m + 1, 0).getDate();
+  const days = new Date(y, m + 1, 0).getDate();   // <-- fixed
   const start = first.getDay();
   const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
