@@ -29,7 +29,7 @@ const formatNiceNumber = (val) => {
 const formatExactValue = (val) => {
   const n = Number(val);
   if (!Number.isFinite(n)) return '';
-  const truncated = Math.trunc(n * 100) / 100;
+  const truncated = Math.trunc(n * 100) / 100; // keep up to 2 decimals without rounding
   const hasDecimals = Math.abs(truncated % 1) > 0;
   const oneDecimal = Math.abs(Math.trunc(truncated * 10) / 10 - Math.trunc(truncated)) > 0;
   const minFrac = 0;
@@ -38,6 +38,7 @@ const formatExactValue = (val) => {
 };
 
 /* ========== Movements & Cycles ========== */
+// Legacy block before Sep 1 (your original 7)
 const LEGACY_MOVEMENTS = {
   Sunday:    { key: 'sun', name: '3 Rep Max Landmine clean', unit: 'lbs' },
   Monday:    { key: 'mon', name: '6 Rep Reverse Lunge Max', unit: 'lbs' },
@@ -48,9 +49,14 @@ const LEGACY_MOVEMENTS = {
   Saturday:  { key: 'sat', name: 'Max distance 30 sec assault bike', unit: 'miles' },
 };
 
-// Current 8-week block (starts Sep 1, 2025 – Monday)
-const SEPT_CYCLE_START = new Date('2025-09-01');
-const SEPT_CYCLE_WEEKS = 8;
+// Previous 8-week cycle window (explicit for July 6 – Aug 31)
+const PREV_CYCLE_START = new Date('2025-07-06'); // Sunday
+const PREV_CYCLE_END   = new Date('2025-08-31'); // Sunday
+const PREV_WEEK_TEMPLATE = { ...LEGACY_MOVEMENTS };
+
+// Sep cycle: **now 6 weeks** (Sep 1 – Oct 12, 2025)
+const SEPT_CYCLE_START = new Date('2025-09-01'); // Monday
+const SEPT_CYCLE_WEEKS = 6;
 const SEPT_WEEK_TEMPLATE = {
   Monday:    { key: 'w_mon', name: '6 Rep Bulgarian Split Squat', unit: 'lbs' },
   Tuesday:   { key: 'w_tue', name: '6 Rep DB Floor Press',        unit: 'lbs' },
@@ -61,14 +67,24 @@ const SEPT_WEEK_TEMPLATE = {
   Sunday:    { key: 'w_sun', name: 'Keiser Rotate to Press',       unit: 'watts' },
 };
 
-// Previous 8-week cycle window (explicit)
-const PREV_CYCLE_START = new Date('2025-07-06');
-const PREV_CYCLE_END   = new Date('2025-08-31');
-const PREV_WEEK_TEMPLATE = { ...LEGACY_MOVEMENTS };
+// NEW Oct cycle: **6 weeks** starting Monday 10/13/2025
+const OCT_CYCLE_START = new Date('2025-10-13'); // Monday
+const OCT_CYCLE_WEEKS = 6;
+const OCT_WEEK_TEMPLATE = {
+  Monday:    { key: 'o_mon', name: 'Barbell Box Squat',            unit: 'lbs' },
+  Tuesday:   { key: 'o_tue', name: 'Barbell Block Bench Press',    unit: 'lbs' },
+  Wednesday: { key: 'o_wed', name: '.25 Assault Bike',             unit: 'time' }, // lower is better
+  Thursday:  { key: 'o_thu', name: 'Kickstand Landmine RDL',       unit: 'lbs' },
+  Friday:    { key: 'o_fri', name: 'Half Kneeling S/A DB Press',   unit: 'lbs' },
+  Saturday:  { key: 'o_sat', name: '.25 Distance Run',             unit: 'time' }, // lower is better
+  Sunday:    { key: 'o_sun', name: 'Kettlebell Complex',           unit: 'lbs' },
+};
 
+// Cycles in order (Prev → Sep → Oct)
 const CYCLES = [
   { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE },
-  { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS, weekTemplate: SEPT_WEEK_TEMPLATE },
+  { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS,     weekTemplate: SEPT_WEEK_TEMPLATE },
+  { start: OCT_CYCLE_START,  weeks: OCT_CYCLE_WEEKS,      weekTemplate: OCT_WEEK_TEMPLATE },
 ];
 
 function getCycleBounds(cycle) {
@@ -214,7 +230,7 @@ export default function App() {
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [inputVal, setInputVal] = useState('');
-  const [inputNotes, setInputNotes] = useState(''); // NEW: notes
+  const [inputNotes, setInputNotes] = useState('');
   const [dbView, setDbView] = useState('this'); // 'this' | 'prev' | 'all'
   const [isMobile, setIsMobile] = useState(false);
 
@@ -298,31 +314,30 @@ export default function App() {
   }, []);
 
   /* ---- Prefill value/notes when selecting a day (carry forward notes for same movement) ---- */
-useEffect(() => {
-  if (!session) return;
+  useEffect(() => {
+    if (!session) return;
 
-  const targetISO = isoLocal(selectedDate);
-  const mine = entries.filter(e => e.user_id === session.user.id);
+    const targetISO = isoLocal(selectedDate);
+    const mine = entries.filter(e => e.user_id === session.user.id);
 
-  // If there’s already an entry for the selected date, use it.
-  const existing = mine.find(e => e.date === targetISO);
-  if (existing) {
-    setInputVal(existing.value != null ? String(existing.value) : '');
-    setInputNotes(existing.notes || '');
-    return;
-  }
+    // If there’s already an entry for the selected date, use it.
+    const existing = mine.find(e => e.date === targetISO);
+    if (existing) {
+      setInputVal(existing.value != null ? String(existing.value) : '');
+      setInputNotes(existing.notes || '');
+      return;
+    }
 
-  // Otherwise, carry forward notes from the most recent prior entry for the same movement.
-  const mov = movementForDate(selectedDate);
-  const priorForMovement = mine
-    .filter(e => e.movement === mov.name && e.date < targetISO)
-    .sort((a, b) => a.date.localeCompare(b.date)) // ISO strings sort correctly
-    .pop();
+    // Otherwise, carry forward notes from the most recent prior entry for the same movement.
+    const mov = movementForDate(selectedDate);
+    const priorForMovement = mine
+      .filter(e => e.movement === mov.name && e.date < targetISO)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .pop();
 
-  setInputVal('');
-  setInputNotes(priorForMovement?.notes || '');
-}, [selectedDate, session, entries]);
-
+    setInputVal('');
+    setInputNotes(priorForMovement?.notes || '');
+  }, [selectedDate, session, entries]);
 
   /* ---- Save profile ---- */
   async function saveProfile() {
@@ -367,7 +382,7 @@ useEffect(() => {
       unit: mov.unit,
       name: name.trim(),
       gender,
-      notes: notes || null, // NEW
+      notes: notes || null,
     };
 
     const { error } = await supabase
@@ -408,7 +423,7 @@ useEffect(() => {
   const leaderboard = useMemo(() => {
     if (!lbMovementName) return { male: [], female: [], unit: '' };
     const movementUnit = getMovementUnitByName(lbMovementName);
-    const LOWER_BETTER_MOVES = new Set(['.1 Distance Run']);
+    const LOWER_BETTER_MOVES = new Set(['.1 Distance Run', '.25 Assault Bike', '.25 Distance Run']);
     const lowerIsBetter = movementUnit === 'time' || LOWER_BETTER_MOVES.has(lbMovementName);
     const rows = entries.filter(
       (e) =>
@@ -885,7 +900,7 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         </>
       )}
 
-      {/* All-time across all configured movements */}
+      {/* All-time across all configured movements (no TBD) */}
       {dbView === 'all' && (
         <>
           {(() => {
@@ -924,7 +939,7 @@ function ChartCard({ title, unit, rows, data }) {
   const dataMin = values.length ? Math.min(...values) : 0;
   const dataMax = values.length ? Math.max(...values) : 1;
   const span = Math.max(1, dataMax - dataMin);
-  const pad = span * 0.1;
+  const pad = span * 0.1; // 10% padding
   const yLower = dataMin - pad < 0 && dataMin >= 0 ? 0 : dataMin - pad;
   const yUpper = dataMax + pad;
 
@@ -957,4 +972,3 @@ function ChartCard({ title, unit, rows, data }) {
     </div>
   );
 }
-
