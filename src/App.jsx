@@ -696,7 +696,7 @@ export default function App() {
 /* ================= CalendarGrid ================= */
 function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, inputNotes, setInputNotes, saveEntry }) {
   const y = monthDate.getFullYear();
-  the const days = new Date(y, monthDate.getMonth() + 1, 0).getDate(); // <-- no bug; just compute days once
+   const days = new Date(y, monthDate.getMonth() + 1, 0).getDate(); // <-- no bug; just compute days once
   const m = monthDate.getMonth();
   const first = new Date(y, m, 1);
   const start = first.getDay();
