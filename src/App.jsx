@@ -54,7 +54,7 @@ const PREV_CYCLE_START = new Date('2025-07-06'); // Sunday
 const PREV_CYCLE_END   = new Date('2025-08-31'); // Sunday
 const PREV_WEEK_TEMPLATE = { ...LEGACY_MOVEMENTS };
 
-// Sep cycle: **now 6 weeks** (Sep 1 – Oct 12, 2025)
+// Sep cycle: 6 weeks (Sep 1 – Oct 12, 2025)
 const SEPT_CYCLE_START = new Date('2025-09-01'); // Monday
 const SEPT_CYCLE_WEEKS = 6;
 const SEPT_WEEK_TEMPLATE = {
@@ -67,7 +67,7 @@ const SEPT_WEEK_TEMPLATE = {
   Sunday:    { key: 'w_sun', name: 'Keiser Rotate to Press',       unit: 'watts' },
 };
 
-// NEW Oct cycle: **6 weeks** starting Monday 10/13/2025
+// Oct cycle: 6 weeks (Oct 13 – Nov 23, 2025)
 const OCT_CYCLE_START = new Date('2025-10-13'); // Monday
 const OCT_CYCLE_WEEKS = 6;
 const OCT_WEEK_TEMPLATE = {
@@ -80,11 +80,25 @@ const OCT_WEEK_TEMPLATE = {
   Sunday:    { key: 'o_sun', name: 'Kettlebell Complex',           unit: 'lbs' },
 };
 
-// Cycles in order (Prev → Sep → Oct)
+// NEW Nov–Jan cycle: 6 weeks (Nov 24, 2025 – Jan 4, 2026)
+const NOV_CYCLE_START = new Date('2025-11-24'); // Monday
+const NOV_CYCLE_WEEKS = 6;
+const NOV_WEEK_TEMPLATE = {
+  Monday:    { key: 'n_mon', name: 'Keiser Belt Squat',         unit: 'watts' },
+  Tuesday:   { key: 'n_tue', name: 'S/A Tempo DB Row',          unit: 'lbs' },
+  Wednesday: { key: 'n_wed', name: 'Keiser Step Chop',          unit: 'watts' },
+  Thursday:  { key: 'n_thu', name: 'Barbell Hip Thrust',        unit: 'lbs' },
+  Friday:    { key: 'n_fri', name: 'S/A Kneeling Pull Down',    unit: 'kgs' },
+  Saturday:  { key: 'n_sat', name: '200 Meter Ski',             unit: 'time' }, // lower is better
+  Sunday:    { key: 'n_sun', name: 'Landmine Clean + Jerk',     unit: 'lbs' },
+};
+
+// Cycles in order (Prev → Sep → Oct → Nov/Jan)
 const CYCLES = [
   { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE },
   { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS,     weekTemplate: SEPT_WEEK_TEMPLATE },
   { start: OCT_CYCLE_START,  weeks: OCT_CYCLE_WEEKS,      weekTemplate: OCT_WEEK_TEMPLATE },
+  { start: NOV_CYCLE_START,  weeks: NOV_CYCLE_WEEKS,      weekTemplate: NOV_WEEK_TEMPLATE },
 ];
 
 function getCycleBounds(cycle) {
@@ -423,7 +437,7 @@ export default function App() {
   const leaderboard = useMemo(() => {
     if (!lbMovementName) return { male: [], female: [], unit: '' };
     const movementUnit = getMovementUnitByName(lbMovementName);
-    const LOWER_BETTER_MOVES = new Set(['.1 Distance Run', '.25 Assault Bike', '.25 Distance Run']);
+    const LOWER_BETTER_MOVES = new Set(['.1 Distance Run', '.25 Assault Bike', '.25 Distance Run', '200 Meter Ski']);
     const lowerIsBetter = movementUnit === 'time' || LOWER_BETTER_MOVES.has(lbMovementName);
     const rows = entries.filter(
       (e) =>
@@ -682,9 +696,9 @@ export default function App() {
 /* ================= CalendarGrid ================= */
 function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, inputNotes, setInputNotes, saveEntry }) {
   const y = monthDate.getFullYear();
+  the const days = new Date(y, monthDate.getMonth() + 1, 0).getDate(); // <-- no bug; just compute days once
   const m = monthDate.getMonth();
   const first = new Date(y, m, 1);
-  const days = new Date(y, m + 1, 0).getDate();
   const start = first.getDay();
   const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
