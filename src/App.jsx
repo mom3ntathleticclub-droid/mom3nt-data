@@ -80,7 +80,7 @@ const OCT_WEEK_TEMPLATE = {
   Sunday:    { key: 'o_sun', name: 'Kettlebell Complex',           unit: 'lbs' },
 };
 
-// NEW Nov–Jan cycle: 6 weeks (Nov 24, 2025 – Jan 4, 2026)
+// Nov–Jan cycle: 6 weeks (Nov 24, 2025 – Jan 4, 2026)
 const NOV_CYCLE_START = new Date('2025-11-24'); // Monday
 const NOV_CYCLE_WEEKS = 6;
 const NOV_WEEK_TEMPLATE = {
@@ -93,12 +93,26 @@ const NOV_WEEK_TEMPLATE = {
   Sunday:    { key: 'n_sun', name: 'Landmine Clean + Jerk',     unit: 'lbs' },
 };
 
-// Cycles in order (Prev → Sep → Oct → Nov/Jan)
+// NEW Jan–Feb cycle: 6 weeks (Jan 12, 2026 – Feb 22, 2026)
+const JAN_CYCLE_START = new Date('2026-01-12'); // Monday
+const JAN_CYCLE_WEEKS = 6;
+const JAN_WEEK_TEMPLATE = {
+  Monday:    { key: 'j_mon', name: 'Landmine kickstand squat 6 RM',          unit: 'lbs' },
+  Tuesday:   { key: 'j_tue', name: 'Seated Cable Bench Row 6 RM',            unit: 'kgs' },
+  Wednesday: { key: 'j_wed', name: 'Keiser Bar Chop Max Power',              unit: 'watts' },
+  Thursday:  { key: 'j_thu', name: 'Smith Bulgarian Split Squat 6 RM',       unit: 'lbs' },
+  Friday:    { key: 'j_fri', name: 'Smith Pin Press 6 RM',                   unit: 'lbs' },
+  Saturday:  { key: 'j_sat', name: 'Treadmill 20 Sec Max Distance',          unit: 'miles' },
+  Sunday:    { key: 'j_sun', name: 'S/A Kickstand KB Clean',                 unit: 'lbs' },
+};
+
+// Cycles in order (Prev → Sep → Oct → Nov/Jan → Jan/Feb)
 const CYCLES = [
   { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE },
   { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS,     weekTemplate: SEPT_WEEK_TEMPLATE },
   { start: OCT_CYCLE_START,  weeks: OCT_CYCLE_WEEKS,      weekTemplate: OCT_WEEK_TEMPLATE },
   { start: NOV_CYCLE_START,  weeks: NOV_CYCLE_WEEKS,      weekTemplate: NOV_WEEK_TEMPLATE },
+  { start: JAN_CYCLE_START,  weeks: JAN_CYCLE_WEEKS,      weekTemplate: JAN_WEEK_TEMPLATE },
 ];
 
 function getCycleBounds(cycle) {
@@ -696,10 +710,10 @@ export default function App() {
 /* ================= CalendarGrid ================= */
 function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inputVal, setInputVal, inputNotes, setInputNotes, saveEntry }) {
   const y = monthDate.getFullYear();
-   const days = new Date(y, monthDate.getMonth() + 1, 0).getDate(); // <-- no bug; just compute days once
   const m = monthDate.getMonth();
   const first = new Date(y, m, 1);
   const start = first.getDay();
+  const days = new Date(y, m + 1, 0).getDate();
   const cells = [...range(start).map(() => null), ...range(days).map((d) => new Date(y, m, d + 1))];
 
   const gap = isMobile ? 2 : 6;
