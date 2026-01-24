@@ -102,7 +102,7 @@ const JAN_WEEK_TEMPLATE = {
   Wednesday: { key: 'j_wed', name: 'Keiser Bar Chop Max Power',              unit: 'watts' },
   Thursday:  { key: 'j_thu', name: 'Smith Bulgarian Split Squat 6 RM',       unit: 'lbs' },
   Friday:    { key: 'j_fri', name: 'Smith Pin Press 6 RM',                   unit: 'lbs' },
-  Saturday:  { key: 'j_sat', name: 'Treadmill 20 Sec Max Distance',          unit: 'miles' },
+  Saturday:  { key: 'j_sat', name: 'Treadmill 30 Sec Max Distance',          unit: 'miles' },
   Sunday:    { key: 'j_sun', name: 'S/A Kickstand KB Clean',                 unit: 'lbs' },
 };
 
