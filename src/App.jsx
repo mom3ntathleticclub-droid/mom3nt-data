@@ -93,26 +93,40 @@ const NOV_WEEK_TEMPLATE = {
   Sunday:    { key: 'n_sun', name: 'Landmine Clean + Jerk',     unit: 'lbs' },
 };
 
-// NEW Jan–Feb cycle: 6 weeks (Jan 12, 2026 – Feb 22, 2026)
+// Jan–Feb cycle: 6 weeks (Jan 12, 2026 – Feb 22, 2026)
 const JAN_CYCLE_START = new Date('2026-01-12'); // Monday
 const JAN_CYCLE_WEEKS = 6;
 const JAN_WEEK_TEMPLATE = {
-  Monday:    { key: 'j_mon', name: 'Landmine kickstand squat 6 RM',          unit: 'lbs' },
-  Tuesday:   { key: 'j_tue', name: 'Seated Cable Bench Row 6 RM',            unit: 'kgs' },
-  Wednesday: { key: 'j_wed', name: 'Keiser Bar Chop Max Power',              unit: 'watts' },
-  Thursday:  { key: 'j_thu', name: 'Smith Bulgarian Split Squat 6 RM',       unit: 'lbs' },
-  Friday:    { key: 'j_fri', name: 'Smith Pin Press 6 RM',                   unit: 'lbs' },
-  Saturday:  { key: 'j_sat', name: 'Treadmill 30 Sec Max Distance',          unit: 'miles' },
-  Sunday:    { key: 'j_sun', name: 'S/A Kickstand KB Clean',                 unit: 'lbs' },
+  Monday:    { key: 'j_mon', name: 'Landmine kickstand squat 6 RM',      unit: 'lbs' },
+  Tuesday:   { key: 'j_tue', name: 'Seated Cable Bench Row 6 RM',        unit: 'kgs' },
+  Wednesday: { key: 'j_wed', name: 'Keiser Bar Chop Max Power',          unit: 'watts' },
+  Thursday:  { key: 'j_thu', name: 'Smith Bulgarian Split Squat 6 RM',   unit: 'lbs' },
+  Friday:    { key: 'j_fri', name: 'Smith Pin Press 6 RM',               unit: 'lbs' },
+  Saturday:  { key: 'j_sat', name: 'Treadmill 30 Sec Max Distance',      unit: 'miles' },
+  Sunday:    { key: 'j_sun', name: 'S/A Kickstand KB Clean',             unit: 'lbs' },
 };
 
-// Cycles in order (Prev → Sep → Oct → Nov/Jan → Jan/Feb)
+// NEW Feb–Apr cycle: 6 weeks (Feb 23, 2026 – Apr 5, 2026)
+const FEB_CYCLE_START = new Date('2026-02-23'); // Monday
+const FEB_CYCLE_WEEKS = 6;
+const FEB_WEEK_TEMPLATE = {
+  Monday:    { key: 'f_mon', name: 'Smith Pin Squats x 6 reps',      unit: 'lbs' },
+  Tuesday:   { key: 'f_tue', name: 'Keiser Bench Press',             unit: 'watts' },
+  Wednesday: { key: 'f_wed', name: 'Cable Step Downs x 6 reps',      unit: 'kgs' },
+  Thursday:  { key: 'f_thu', name: 'Smith Kickstand RDL x 6 reps',   unit: 'lbs' },
+  Friday:    { key: 'f_fri', name: 'Cable Pull Down x 6 reps',       unit: 'kgs' },
+  Saturday:  { key: 'f_sat', name: 'Max Assault Bike Wattage',       unit: 'watts' },
+  Sunday:    { key: 'f_sun', name: '500m Ski time',                  unit: 'time' }, // lower is better
+};
+
+// Cycles in order (Prev → Sep → Oct → Nov/Jan → Jan/Feb → Feb/Apr)
 const CYCLES = [
   { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE },
   { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS,     weekTemplate: SEPT_WEEK_TEMPLATE },
   { start: OCT_CYCLE_START,  weeks: OCT_CYCLE_WEEKS,      weekTemplate: OCT_WEEK_TEMPLATE },
   { start: NOV_CYCLE_START,  weeks: NOV_CYCLE_WEEKS,      weekTemplate: NOV_WEEK_TEMPLATE },
   { start: JAN_CYCLE_START,  weeks: JAN_CYCLE_WEEKS,      weekTemplate: JAN_WEEK_TEMPLATE },
+  { start: FEB_CYCLE_START,  weeks: FEB_CYCLE_WEEKS,      weekTemplate: FEB_WEEK_TEMPLATE },
 ];
 
 function getCycleBounds(cycle) {
