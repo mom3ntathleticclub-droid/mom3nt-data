@@ -60,53 +60,53 @@ const SEPT_CYCLE_WEEKS = 6;
 const SEPT_WEEK_TEMPLATE = {
   Monday:    { key: 'w_mon', name: '6 Rep Bulgarian Split Squat', unit: 'lbs' },
   Tuesday:   { key: 'w_tue', name: '6 Rep DB Floor Press',        unit: 'lbs' },
-  Wednesday: { key: 'w_wed', name: '.1 Distance Run',              unit: 'time' },
-  Thursday:  { key: 'w_thu', name: '6 Rep Smith RDL',              unit: 'lbs' },
-  Friday:    { key: 'w_fri', name: 'Pull Up + Push Press EDT',     unit: 'rounds' },
-  Saturday:  { key: 'w_sat', name: 'Ski/Curl/Squat METCON',        unit: 'time' },
-  Sunday:    { key: 'w_sun', name: 'Keiser Rotate to Press',       unit: 'watts' },
+  Wednesday: { key: 'w_wed', name: '.1 Distance Run',             unit: 'time' },
+  Thursday:  { key: 'w_thu', name: '6 Rep Smith RDL',             unit: 'lbs' },
+  Friday:    { key: 'w_fri', name: 'Pull Up + Push Press EDT',    unit: 'rounds' },
+  Saturday:  { key: 'w_sat', name: 'Ski/Curl/Squat METCON',       unit: 'time' },
+  Sunday:    { key: 'w_sun', name: 'Keiser Rotate to Press',      unit: 'watts' },
 };
 
 // Oct cycle: 6 weeks (Oct 13 – Nov 23, 2025)
 const OCT_CYCLE_START = new Date('2025-10-13'); // Monday
 const OCT_CYCLE_WEEKS = 6;
 const OCT_WEEK_TEMPLATE = {
-  Monday:    { key: 'o_mon', name: 'Barbell Box Squat',            unit: 'lbs' },
-  Tuesday:   { key: 'o_tue', name: 'Barbell Block Bench Press',    unit: 'lbs' },
-  Wednesday: { key: 'o_wed', name: '.25 Assault Bike',             unit: 'time' }, // lower is better
-  Thursday:  { key: 'o_thu', name: 'Kickstand Landmine RDL',       unit: 'lbs' },
-  Friday:    { key: 'o_fri', name: 'Half Kneeling S/A DB Press',   unit: 'lbs' },
-  Saturday:  { key: 'o_sat', name: '.25 Distance Run',             unit: 'time' }, // lower is better
-  Sunday:    { key: 'o_sun', name: 'Kettlebell Complex',           unit: 'lbs' },
+  Monday:    { key: 'o_mon', name: 'Barbell Box Squat',           unit: 'lbs' },
+  Tuesday:   { key: 'o_tue', name: 'Barbell Block Bench Press',   unit: 'lbs' },
+  Wednesday: { key: 'o_wed', name: '.25 Assault Bike',            unit: 'time' }, // lower is better
+  Thursday:  { key: 'o_thu', name: 'Kickstand Landmine RDL',      unit: 'lbs' },
+  Friday:    { key: 'o_fri', name: 'Half Kneeling S/A DB Press',  unit: 'lbs' },
+  Saturday:  { key: 'o_sat', name: '.25 Distance Run',            unit: 'time' }, // lower is better
+  Sunday:    { key: 'o_sun', name: 'Kettlebell Complex',          unit: 'lbs' },
 };
 
 // Nov–Jan cycle: 6 weeks (Nov 24, 2025 – Jan 4, 2026)
 const NOV_CYCLE_START = new Date('2025-11-24'); // Monday
 const NOV_CYCLE_WEEKS = 6;
 const NOV_WEEK_TEMPLATE = {
-  Monday:    { key: 'n_mon', name: 'Keiser Belt Squat',         unit: 'watts' },
-  Tuesday:   { key: 'n_tue', name: 'S/A Tempo DB Row',          unit: 'lbs' },
-  Wednesday: { key: 'n_wed', name: 'Keiser Step Chop',          unit: 'watts' },
-  Thursday:  { key: 'n_thu', name: 'Barbell Hip Thrust',        unit: 'lbs' },
-  Friday:    { key: 'n_fri', name: 'S/A Kneeling Pull Down',    unit: 'kgs' },
-  Saturday:  { key: 'n_sat', name: '200 Meter Ski',             unit: 'time' }, // lower is better
-  Sunday:    { key: 'n_sun', name: 'Landmine Clean + Jerk',     unit: 'lbs' },
+  Monday:    { key: 'n_mon', name: 'Keiser Belt Squat',       unit: 'watts' },
+  Tuesday:   { key: 'n_tue', name: 'S/A Tempo DB Row',        unit: 'lbs' },
+  Wednesday: { key: 'n_wed', name: 'Keiser Step Chop',        unit: 'watts' },
+  Thursday:  { key: 'n_thu', name: 'Barbell Hip Thrust',      unit: 'lbs' },
+  Friday:    { key: 'n_fri', name: 'S/A Kneeling Pull Down',  unit: 'kgs' },
+  Saturday:  { key: 'n_sat', name: '200 Meter Ski',           unit: 'time' }, // lower is better
+  Sunday:    { key: 'n_sun', name: 'Landmine Clean + Jerk',   unit: 'lbs' },
 };
 
 // Jan–Feb cycle: 6 weeks (Jan 12, 2026 – Feb 22, 2026)
 const JAN_CYCLE_START = new Date('2026-01-12'); // Monday
 const JAN_CYCLE_WEEKS = 6;
 const JAN_WEEK_TEMPLATE = {
-  Monday:    { key: 'j_mon', name: 'Landmine kickstand squat 6 RM',      unit: 'lbs' },
-  Tuesday:   { key: 'j_tue', name: 'Seated Cable Bench Row 6 RM',        unit: 'kgs' },
-  Wednesday: { key: 'j_wed', name: 'Keiser Bar Chop Max Power',          unit: 'watts' },
-  Thursday:  { key: 'j_thu', name: 'Smith Bulgarian Split Squat 6 RM',   unit: 'lbs' },
-  Friday:    { key: 'j_fri', name: 'Smith Pin Press 6 RM',               unit: 'lbs' },
-  Saturday:  { key: 'j_sat', name: 'Treadmill 30 Sec Max Distance',      unit: 'miles' },
-  Sunday:    { key: 'j_sun', name: 'S/A Kickstand KB Clean',             unit: 'lbs' },
+  Monday:    { key: 'j_mon', name: 'Landmine kickstand squat 6 RM',     unit: 'lbs' },
+  Tuesday:   { key: 'j_tue', name: 'Seated Cable Bench Row 6 RM',       unit: 'kgs' },
+  Wednesday: { key: 'j_wed', name: 'Keiser Bar Chop Max Power',         unit: 'watts' },
+  Thursday:  { key: 'j_thu', name: 'Smith Bulgarian Split Squat 6 RM',  unit: 'lbs' },
+  Friday:    { key: 'j_fri', name: 'Smith Pin Press 6 RM',              unit: 'lbs' },
+  Saturday:  { key: 'j_sat', name: 'Treadmill 30 Sec Max Distance',     unit: 'miles' },
+  Sunday:    { key: 'j_sun', name: 'S/A Kickstand KB Clean',            unit: 'lbs' },
 };
 
-// NEW Feb–Apr cycle: 6 weeks (Feb 23, 2026 – Apr 5, 2026)
+// Feb–Apr cycle: 6 weeks (Feb 23, 2026 – Apr 5, 2026)
 const FEB_CYCLE_START = new Date('2026-02-23'); // Monday
 const FEB_CYCLE_WEEKS = 6;
 const FEB_WEEK_TEMPLATE = {
@@ -119,7 +119,20 @@ const FEB_WEEK_TEMPLATE = {
   Sunday:    { key: 'f_sun', name: '500m Ski time',                  unit: 'time' }, // lower is better
 };
 
-// Cycles in order (Prev → Sep → Oct → Nov/Jan → Jan/Feb → Feb/Apr)
+// NEW Apr–May cycle: 6 weeks (Apr 6, 2026 – May 17, 2026)
+const APR_CYCLE_START = new Date('2026-04-06'); // Monday
+const APR_CYCLE_WEEKS = 6;
+const APR_WEEK_TEMPLATE = {
+  Monday:    { key: 'a_mon', name: 'Barbell Kickstand Box Squats x 5ea',               unit: 'lbs' },
+  Tuesday:   { key: 'a_tue', name: 'Barbell Tempo Bench Press x 5 reps',               unit: 'lbs' },
+  Wednesday: { key: 'a_wed', name: '0:45 Run for Distance',                            unit: 'miles' },
+  Thursday:  { key: 'a_thu', name: 'Banded DB RDL x 6',                                unit: 'lbs' },
+  Friday:    { key: 'a_fri', name: 'Keiser + Dumbbell Vertical Push/Pull x 6ea',       unit: 'lbs' },
+  Saturday:  { key: 'a_sat', name: 'Kettlebell Complex',                               unit: 'lbs' },
+  Sunday:    { key: 'a_sun', name: 'Landmine Complex : 3 Cleans + 3 Jerks',            unit: 'lbs' },
+};
+
+// Cycles in order
 const CYCLES = [
   { start: PREV_CYCLE_START, endOverride: PREV_CYCLE_END, weekTemplate: PREV_WEEK_TEMPLATE },
   { start: SEPT_CYCLE_START, weeks: SEPT_CYCLE_WEEKS,     weekTemplate: SEPT_WEEK_TEMPLATE },
@@ -127,6 +140,7 @@ const CYCLES = [
   { start: NOV_CYCLE_START,  weeks: NOV_CYCLE_WEEKS,      weekTemplate: NOV_WEEK_TEMPLATE },
   { start: JAN_CYCLE_START,  weeks: JAN_CYCLE_WEEKS,      weekTemplate: JAN_WEEK_TEMPLATE },
   { start: FEB_CYCLE_START,  weeks: FEB_CYCLE_WEEKS,      weekTemplate: FEB_WEEK_TEMPLATE },
+  { start: APR_CYCLE_START,  weeks: APR_CYCLE_WEEKS,      weekTemplate: APR_WEEK_TEMPLATE },
 ];
 
 function getCycleBounds(cycle) {
@@ -429,7 +443,8 @@ export default function App() {
 
     const { error } = await supabase
       .from('entries')
-      .upsert(row, { onConflict: ['user_id', 'date'] }); // unique on (user_id,date)
+      .upsert(row, { onConflict: 'user_id,date' });
+
     if (error) return alert(error.message);
 
     const { data } = await supabase.from('entries').select('*').order('date', { ascending: true });
@@ -465,7 +480,13 @@ export default function App() {
   const leaderboard = useMemo(() => {
     if (!lbMovementName) return { male: [], female: [], unit: '' };
     const movementUnit = getMovementUnitByName(lbMovementName);
-    const LOWER_BETTER_MOVES = new Set(['.1 Distance Run', '.25 Assault Bike', '.25 Distance Run', '200 Meter Ski']);
+    const LOWER_BETTER_MOVES = new Set([
+      '.1 Distance Run',
+      '.25 Assault Bike',
+      '.25 Distance Run',
+      '200 Meter Ski',
+      '500m Ski time',
+    ]);
     const lowerIsBetter = movementUnit === 'time' || LOWER_BETTER_MOVES.has(lbMovementName);
     const rows = entries.filter(
       (e) =>
@@ -807,7 +828,6 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
             )}
           </div>
 
-          {/* Inputs */}
           <div style={{display:'flex',gap:8,flexWrap:'wrap', alignItems:'center'}}>
             <NumberField
               value={inputVal}
@@ -832,7 +852,6 @@ function CalendarGrid({ monthDate, isMobile, selectedDate, setSelectedDate, inpu
             </button>
           </div>
 
-          {/* Notes */}
           <div>
             <label style={{ fontSize:12, display:'block', marginBottom:4, color:'#000' }}>Notes (optional)</label>
             <textarea
@@ -902,7 +921,6 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         )}
       </div>
 
-      {/* Current Cycle */}
       {dbView === 'this' && (
         <>
           {!currentCycle ? (
@@ -922,7 +940,6 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         </>
       )}
 
-      {/* Previous Cycle */}
       {dbView === 'prev' && (
         <>
           {!previousCycle ? (
@@ -942,7 +959,6 @@ function DatabaseSection({ dbView, setDbView, myEntries }) {
         </>
       )}
 
-      {/* All-time across all configured movements (no TBD) */}
       {dbView === 'all' && (
         <>
           {(() => {
@@ -981,7 +997,7 @@ function ChartCard({ title, unit, rows, data }) {
   const dataMin = values.length ? Math.min(...values) : 0;
   const dataMax = values.length ? Math.max(...values) : 1;
   const span = Math.max(1, dataMax - dataMin);
-  const pad = span * 0.1; // 10% padding
+  const pad = span * 0.1;
   const yLower = dataMin - pad < 0 && dataMin >= 0 ? 0 : dataMin - pad;
   const yUpper = dataMax + pad;
 
